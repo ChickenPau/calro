@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { createObjectCsvStringifier } from 'csv-writer';
 import { calculateBmi, weightRangeForBmi } from '@/utils/bmi';
 import { formatYmdInUtcOffset } from '@/utils/time';
+import { config } from '@/config';
 
 export class NutritionService {
   public async registerUser(telegram_id: number, username?: string, first_name?: string, last_name?: string): Promise<void> {
@@ -28,12 +29,29 @@ export class NutritionService {
     const bmiValue = calculateBmi(weight_kg, height_cm);
     const bmi_status: 'Obese' | 'Acceptable range' = bmiValue > 27 ? 'Obese' : 'Acceptable range';
 
-    const bmiRange = { bmi_low: 18.5, bmi_high: 24.9, rationale: 'Standard adult range' };
+    const fallbackBmiRange = { bmi_low: 18.5, bmi_high: 24.9, rationale: 'Standard adult range' };
+    let bmiRange = fallbackBmiRange;
+    if (config.gemini.apiKey) {
+      try {
+        bmiRange = await aiService.getHealthyBmiRange({ age_years, sex, height_cm });
+      } catch {
+        bmiRange = fallbackBmiRange;
+      }
+    }
 
     const sexConst = sex === 'Male' ? 5 : sex === 'Female' ? -161 : -78;
     const bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age_years + sexConst;
     const tdee = bmr * 1.55;
-    const dailyCalorieGoal = Math.max(1200, Math.min(4500, Math.round(tdee * 0.9)));
+    const fallbackDailyCalorieGoal = Math.max(1200, Math.min(4500, Math.round(tdee * 0.9)));
+    let dailyCalorieGoal = fallbackDailyCalorieGoal;
+    if (config.gemini.apiKey) {
+      try {
+        const goalData = await aiService.calculateDailyCalorieGoal({ age_years, sex, height_cm, weight_kg });
+        dailyCalorieGoal = goalData.goal_calories;
+      } catch {
+        dailyCalorieGoal = fallbackDailyCalorieGoal;
+      }
+    }
 
     const healthyLow = bmiRange.bmi_low;
     const healthyHigh = bmiRange.bmi_high;
