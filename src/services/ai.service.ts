@@ -1,5 +1,4 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import pRetry from 'p-retry';
 import { config } from '@/config';
 import { NutritionData, NutritionDataSchema } from '@/models/nutrition';
 import { z } from 'zod';
@@ -15,6 +14,36 @@ const logger = winston.createLogger({
     new winston.transports.Console(),
   ],
 });
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const retry = async <T>(
+  run: () => Promise<T>,
+  options: {
+    retries: number;
+    minTimeoutMs?: number;
+    factor?: number;
+    onFailedAttempt?: (info: { attemptNumber: number; retriesLeft: number; error: unknown }) => void;
+  }
+): Promise<T> => {
+  const retries = Math.max(0, Math.floor(options.retries));
+  const minTimeoutMs = Math.max(0, Math.floor(options.minTimeoutMs ?? 250));
+  const factor = Math.max(1, options.factor ?? 2);
+
+  let attemptNumber = 1;
+  while (true) {
+    try {
+      return await run();
+    } catch (error) {
+      const retriesLeft = retries - (attemptNumber - 1);
+      if (retriesLeft <= 0) throw error;
+      options.onFailedAttempt?.({ attemptNumber, retriesLeft, error });
+      const backoffMs = Math.round(minTimeoutMs * Math.pow(factor, attemptNumber - 1));
+      await delay(backoffMs);
+      attemptNumber++;
+    }
+  }
+};
 
 export class AIService {
   private genAI: GoogleGenerativeAI;
@@ -71,10 +100,11 @@ export class AIService {
       }
     };
 
-    return pRetry(runAnalysis, {
+    return retry(runAnalysis, {
       retries: 3,
-      onFailedAttempt: (error: any) => {
-        logger.warn(`AI Analysis attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        const message = (error as any)?.message || String(error);
+        logger.warn(`AI Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
       },
     });
   }
@@ -118,10 +148,11 @@ Please respond in the following JSON format ONLY:
       }
     };
 
-    return pRetry(runAnalysis, {
+    return retry(runAnalysis, {
       retries: 3,
-      onFailedAttempt: (error: any) => {
-        logger.warn(`AI Text Analysis attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        const message = (error as any)?.message || String(error);
+        logger.warn(`AI Text Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
       },
     });
   }
@@ -161,10 +192,11 @@ Return JSON ONLY:
       };
     };
 
-    return pRetry(run, {
+    return retry(run, {
       retries: 2,
-      onFailedAttempt: (error: any) => {
-        logger.warn(`BMI attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        const message = (error as any)?.message || String(error);
+        logger.warn(`BMI attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
       },
     });
   }
@@ -213,10 +245,11 @@ Return JSON ONLY:
       };
     };
 
-    return pRetry(run, {
+    return retry(run, {
       retries: 2,
-      onFailedAttempt: (error: any) => {
-        logger.warn(`BMI range attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        const message = (error as any)?.message || String(error);
+        logger.warn(`BMI range attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
       },
     });
   }
@@ -264,10 +297,11 @@ Return JSON ONLY:
       };
     };
 
-    return pRetry(run, {
+    return retry(run, {
       retries: 2,
-      onFailedAttempt: (error: any) => {
-        logger.warn(`Calorie goal attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        const message = (error as any)?.message || String(error);
+        logger.warn(`Calorie goal attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
       },
     });
   }
