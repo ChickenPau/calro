@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+database/*.db
+database/*.db-journal
+tests
+*.log
+.trae
+.git
