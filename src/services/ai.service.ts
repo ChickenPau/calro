@@ -17,6 +17,16 @@ const logger = winston.createLogger({
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const toErrorMeta = (error: unknown) => {
+  const anyErr = error as any;
+  return {
+    name: anyErr?.name,
+    code: anyErr?.code,
+    status: anyErr?.status ?? anyErr?.response?.status,
+    message: anyErr?.message || String(error),
+  };
+};
+
 const retry = async <T>(
   run: () => Promise<T>,
   options: {
@@ -103,8 +113,7 @@ export class AIService {
     return retry(runAnalysis, {
       retries: 3,
       onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
-        const message = (error as any)?.message || String(error);
-        logger.warn(`AI Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
+        logger.warn(`AI Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
       },
     });
   }
@@ -151,8 +160,7 @@ Please respond in the following JSON format ONLY:
     return retry(runAnalysis, {
       retries: 3,
       onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
-        const message = (error as any)?.message || String(error);
-        logger.warn(`AI Text Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
+        logger.warn(`AI Text Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
       },
     });
   }
@@ -195,8 +203,7 @@ Return JSON ONLY:
     return retry(run, {
       retries: 2,
       onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
-        const message = (error as any)?.message || String(error);
-        logger.warn(`BMI attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
+        logger.warn(`BMI attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
       },
     });
   }
@@ -248,8 +255,7 @@ Return JSON ONLY:
     return retry(run, {
       retries: 2,
       onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
-        const message = (error as any)?.message || String(error);
-        logger.warn(`BMI range attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
+        logger.warn(`BMI range attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
       },
     });
   }
@@ -300,8 +306,7 @@ Return JSON ONLY:
     return retry(run, {
       retries: 2,
       onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
-        const message = (error as any)?.message || String(error);
-        logger.warn(`Calorie goal attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: message });
+        logger.warn(`Calorie goal attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
       },
     });
   }

@@ -90,6 +90,10 @@ const getUserFacingAnalysisError = (error: unknown): string => {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
 
+  if (lower.includes('api key') || lower.includes('api_key_invalid') || lower.includes('unauthorized') || lower.includes('permission')) {
+    return '❌ Gemini API key is invalid or missing. Please set `GEMINI_API_KEY` in Railway Variables and redeploy.';
+  }
+
   if (lower.includes('quota') || lower.includes('429') || lower.includes('rate limit')) {
     return '⚠️ Gemini rate limit/quota reached. Please wait a bit and try again, or enable billing / increase quota for your Gemini API key.';
   }

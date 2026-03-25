@@ -28,20 +28,12 @@ export class NutritionService {
     const bmiValue = calculateBmi(weight_kg, height_cm);
     const bmi_status: 'Obese' | 'Acceptable range' = bmiValue > 27 ? 'Obese' : 'Acceptable range';
 
-    let bmiRange: { bmi_low: number; bmi_high: number; rationale: string };
-    try {
-      bmiRange = await aiService.getHealthyBmiRange({ age_years, sex, height_cm });
-    } catch {
-      bmiRange = { bmi_low: 18.5, bmi_high: 24.9, rationale: 'Fallback adult range' };
-    }
+    const bmiRange = { bmi_low: 18.5, bmi_high: 24.9, rationale: 'Standard adult range' };
 
-    let dailyCalorieGoal = 2500;
-    try {
-      const goalData = await aiService.calculateDailyCalorieGoal({ age_years, sex, height_cm, weight_kg });
-      dailyCalorieGoal = goalData.goal_calories;
-    } catch {
-      dailyCalorieGoal = 2500;
-    }
+    const sexConst = sex === 'Male' ? 5 : sex === 'Female' ? -161 : -78;
+    const bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age_years + sexConst;
+    const tdee = bmr * 1.55;
+    const dailyCalorieGoal = Math.max(1200, Math.min(4500, Math.round(tdee * 0.9)));
 
     const healthyLow = bmiRange.bmi_low;
     const healthyHigh = bmiRange.bmi_high;

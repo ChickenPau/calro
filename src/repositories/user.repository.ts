@@ -108,7 +108,7 @@ export class UserRepository {
       profile.healthy_bmi_high,
       profile.target_weight_low_kg,
       profile.target_weight_high_kg,
-      profile.target_weight_high_kg,
+      (profile.target_weight_low_kg + profile.target_weight_high_kg) / 2,
       profile.daily_calorie_goal
     );
   }
