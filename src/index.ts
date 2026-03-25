@@ -24,6 +24,15 @@ const logger = winston.createLogger({
 
 console.log('Bot is starting up...');
 const BUILD_ID = process.env.BUILD_ID || new Date().toISOString();
+if (!config.telegram.token) {
+  logger.error('Missing required env var: TELEGRAM_BOT_TOKEN');
+  process.exit(1);
+}
+
+if (!config.gemini.apiKey) {
+  logger.warn('Missing env var: GEMINI_API_KEY (photo analysis will fail)');
+}
+
 const bot = new Telegraf(config.telegram.token);
 
 const app = express();
