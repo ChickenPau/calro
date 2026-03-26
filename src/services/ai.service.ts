@@ -58,27 +58,56 @@ const retry = async <T>(
 export class AIService {
   private genAI: GoogleGenerativeAI | null;
   private model: any | null;
+  private modelName: string | null;
 
   constructor() {
     if (!config.gemini.apiKey) {
       this.genAI = null;
       this.model = null;
+      this.modelName = null;
       return;
     }
 
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
-    this.model = this.genAI.getGenerativeModel({ model: config.gemini.model });
+    this.modelName = config.gemini.model;
+    this.model = this.genAI.getGenerativeModel({ model: this.modelName });
   }
 
   private ensureModel() {
-    if (!this.model) {
+    if (!this.genAI || !this.model || !this.modelName) {
       throw new Error('GEMINI_API_KEY is missing or invalid');
     }
-    return this.model;
+    return { model: this.model, modelName: this.modelName };
+  }
+
+  private isModelNotSupportedError(error: unknown): boolean {
+    const anyErr = error as any;
+    const status = anyErr?.status ?? anyErr?.response?.status;
+    const message = String(anyErr?.message || '').toLowerCase();
+    return status === 404 || message.includes('not found') || message.includes('not supported for generatecontent');
+  }
+
+  private async generateContent(input: any): Promise<any> {
+    const { model } = this.ensureModel();
+    try {
+      return await model.generateContent(input);
+    } catch (error) {
+      const fallbackModel = 'gemini-1.5-flash';
+      if (this.isModelNotSupportedError(error) && this.modelName !== fallbackModel && this.genAI) {
+        logger.warn('Gemini model not supported; falling back', {
+          requestedModel: this.modelName,
+          fallbackModel,
+          error: toErrorMeta(error),
+        });
+        this.modelName = fallbackModel;
+        this.model = this.genAI.getGenerativeModel({ model: this.modelName });
+        return await this.model.generateContent(input);
+      }
+      throw error;
+    }
   }
 
   public async analyzeFoodImage(imageBase64: string, mimeType: string, userDescription?: string): Promise<{ data: NutritionData; rawResponse: string }> {
-    const model = this.ensureModel();
     const instruction = 'You are an expert sports nutritionist. Analyze the food image provided. Estimate the portion size and provide a macro breakdown: Total Calories, Protein (g), Carbohydrates (g), and Fats (g). Output the data in a clean format and include a short, encouraging coaching tip tailored to optimizing power-to-weight ratio and athletic performance.';
     const prompt = `${instruction}
     ${userDescription ? `The user provided the following description: "${userDescription}". Use this information to improve your recognition of the food in the image.` : ''}
@@ -94,7 +123,7 @@ export class AIService {
     }`;
 
     const runAnalysis = async () => {
-      const result = await model.generateContent([
+      const result = await this.generateContent([
         prompt,
         {
           inlineData: {
@@ -133,7 +162,6 @@ export class AIService {
   }
 
   public async analyzeFoodText(description: string): Promise<{ data: NutritionData; rawResponse: string }> {
-    const model = this.ensureModel();
     const instruction =
       'You are an expert sports nutritionist. Estimate Calories, Protein (g), Carbohydrates (g), and Fats (g) from the user\'s meal description. If portion size is unclear, make a reasonable assumption.';
     const prompt = `${instruction}
@@ -152,7 +180,7 @@ Please respond in the following JSON format ONLY:
 }`;
 
     const runAnalysis = async () => {
-      const result = await model.generateContent(prompt);
+      const result = await this.generateContent(prompt);
       const text = result.response.text();
 
       try {
@@ -181,7 +209,6 @@ Please respond in the following JSON format ONLY:
   }
 
   public async calculateBmi(weightKg: number, heightCm: number): Promise<{ bmi: number; bmi_status: 'Obese' | 'Acceptable range'; target_weight_kg: number }> {
-    const model = this.ensureModel();
     const schema = z.object({
       bmi: z.number(),
       bmi_status: z.enum(['Obese', 'Acceptable range']),
@@ -203,7 +230,7 @@ Return JSON ONLY:
 }`;
 
     const run = async () => {
-      const result = await model.generateContent(prompt);
+      const result = await this.generateContent(prompt);
       const text = result.response.text();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No valid JSON found in BMI response');
@@ -229,7 +256,6 @@ Return JSON ONLY:
     sex: 'Male' | 'Female' | 'Other';
     height_cm: number;
   }): Promise<{ bmi_low: number; bmi_high: number; rationale: string }> {
-    const model = this.ensureModel();
     const schema = z.object({
       bmi_low: z.number(),
       bmi_high: z.number(),
@@ -256,7 +282,7 @@ Return JSON ONLY:
 }`;
 
     const run = async () => {
-      const result = await model.generateContent(prompt);
+      const result = await this.generateContent(prompt);
       const text = result.response.text();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No valid JSON found in BMI range response');
@@ -283,7 +309,6 @@ Return JSON ONLY:
     height_cm: number;
     weight_kg: number;
   }): Promise<{ goal_calories: number; rationale: string }> {
-    const model = this.ensureModel();
     const schema = z.object({
       goal_calories: z.number(),
       rationale: z.string(),
@@ -309,7 +334,7 @@ Return JSON ONLY:
 }`;
 
     const run = async () => {
-      const result = await model.generateContent(prompt);
+      const result = await this.generateContent(prompt);
       const text = result.response.text();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No valid JSON found in calorie goal response');
@@ -347,7 +372,6 @@ Return JSON ONLY:
     };
     recentFoods: Array<{ when: string; food_name: string; calories: number }>;
   }): Promise<string> {
-    const model = this.ensureModel();
     const prompt = `You are a nutrition coach.
 User: ${input.display_name || 'Unknown'}
 BMI: ${input.bmi ?? 'unknown'} (${input.bmi_status || 'unknown'})
@@ -365,7 +389,7 @@ ${input.recentFoods.map((m) => `- ${m.when}: ${m.food_name} (${m.calories} kcal)
 
 Give practical advice for the rest of today. Include hydration reminder, healthy fats examples, and a simple next-meal suggestion. Keep it under 8 lines.`;
 
-    const result = await model.generateContent(prompt);
+    const result = await this.generateContent(prompt);
     return result.response.text().trim();
   }
 
@@ -383,7 +407,6 @@ Give practical advice for the rest of today. Include hydration reminder, healthy
       target_weight_high_kg?: number;
     };
   }): Promise<{ reply: string; more: string; memory: string }> {
-    const model = this.ensureModel();
     const schema = z.object({
       reply: z.string(),
       more: z.string(),
@@ -415,7 +438,7 @@ Return JSON ONLY:
   "memory": "updated compact memory (<=800 chars)"
 }`;
 
-    const result = await model.generateContent(prompt);
+    const result = await this.generateContent(prompt);
     const text = result.response.text();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No valid JSON found in coach response');

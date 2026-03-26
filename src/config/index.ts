@@ -9,7 +9,7 @@ export const config = {
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
-    model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
+    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
   },
   database: {
     path: path.resolve(process.cwd(), process.env.DATABASE_URL || 'database/calro.db'),
