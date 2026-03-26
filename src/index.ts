@@ -59,8 +59,26 @@ type ProfileFlow =
 const profileFlows = new Map<number, ProfileFlow>();
 const coachSessions = new Set<number>();
 
+const COACH_MENU = {
+  hydration: '💧 Hydration',
+  fats: '🥑 Healthy fats',
+  meal: '🍽 Next meal idea',
+  weight: '⚖️ Weight loss',
+  back: '⬅️ Back to menu',
+} as const;
+
 const sendMainMenu = async (ctx: any, text: string) => {
   await ctx.reply(text, buildMainMenu());
+};
+
+const buildCoachMenu = () => {
+  return Markup.keyboard([
+    [COACH_MENU.hydration, COACH_MENU.fats],
+    [COACH_MENU.meal, COACH_MENU.weight],
+    [COACH_MENU.back],
+  ])
+    .resize()
+    .oneTime(false);
 };
 
 const parseNumber = (text: string): number | null => {
@@ -307,15 +325,9 @@ bot.action('profile_reset_confirm', async (ctx) => {
 
 const coachEnterHandler = async (ctx: any) => {
   coachSessions.add(ctx.from.id);
-  await sendMainMenu(ctx, '🧠 Coach mode: ask me anything about nutrition, weight loss, training, or healthy habits.');
   await ctx.reply(
-    'Quick questions:',
-    Markup.inlineKeyboard([
-      [Markup.button.callback('Hydration', 'coach_q_hydration')],
-      [Markup.button.callback('Healthy fats', 'coach_q_fats')],
-      [Markup.button.callback('Next meal idea', 'coach_q_meal')],
-      [Markup.button.callback('Weight loss', 'coach_q_weight')],
-    ])
+    '🧠 Coach mode: pick a quick question below, or type your own message.',
+    buildCoachMenu()
   );
 };
 
@@ -451,7 +463,24 @@ bot.on(message('text'), async (ctx) => {
 
   if (!flow) {
     if (coachSessions.has(userId)) {
-      await runCoachAsk(ctx, text);
+      if (text === COACH_MENU.back) {
+        coachSessions.delete(userId);
+        await sendMainMenu(ctx, 'Main menu:');
+        return;
+      }
+
+      const preset =
+        text === COACH_MENU.hydration
+          ? 'How much water should I drink today and how can I remember?'
+          : text === COACH_MENU.fats
+            ? 'What are healthy fats and what foods should I choose?'
+            : text === COACH_MENU.meal
+              ? 'Suggest a healthy next meal idea based on my goals.'
+              : text === COACH_MENU.weight
+                ? 'Give me a simple plan for fat loss while keeping energy for training.'
+                : null;
+
+      await runCoachAsk(ctx, preset ?? text);
     }
     return;
   }
