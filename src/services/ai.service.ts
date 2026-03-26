@@ -57,27 +57,39 @@ const retry = async <T>(
 
 export class AIService {
   private genAI: GoogleGenerativeAI | null;
-  private model: any | null;
-  private modelName: string | null;
+  private textModel: any | null;
+  private imageModel: any | null;
+  private textModelName: string | null;
+  private imageModelName: string | null;
 
   constructor() {
     if (!config.gemini.apiKey) {
       this.genAI = null;
-      this.model = null;
-      this.modelName = null;
+      this.textModel = null;
+      this.imageModel = null;
+      this.textModelName = null;
+      this.imageModelName = null;
       return;
     }
 
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
-    this.modelName = config.gemini.model;
-    this.model = this.genAI.getGenerativeModel({ model: this.modelName });
+    this.textModelName = config.gemini.textModel;
+    this.imageModelName = config.gemini.imageModel;
+    this.textModel = this.genAI.getGenerativeModel({ model: this.textModelName });
+    this.imageModel = this.genAI.getGenerativeModel({ model: this.imageModelName });
   }
 
-  private ensureModel() {
-    if (!this.genAI || !this.model || !this.modelName) {
+  private ensureModels() {
+    if (!this.genAI || !this.textModel || !this.imageModel || !this.textModelName || !this.imageModelName) {
       throw new Error('GEMINI_API_KEY is missing or invalid');
     }
-    return { model: this.model, modelName: this.modelName };
+    return {
+      genAI: this.genAI,
+      textModel: this.textModel,
+      imageModel: this.imageModel,
+      textModelName: this.textModelName,
+      imageModelName: this.imageModelName,
+    };
   }
 
   private isModelNotSupportedError(error: unknown): boolean {
@@ -87,21 +99,34 @@ export class AIService {
     return status === 404 || message.includes('not found') || message.includes('not supported for generatecontent');
   }
 
-  private async generateContent(input: any): Promise<any> {
-    const { model } = this.ensureModel();
+  private async generateContent(kind: 'text' | 'image', input: any): Promise<any> {
+    const { genAI, textModel, imageModel, textModelName, imageModelName } = this.ensureModels();
+
+    const activeModel = kind === 'image' ? imageModel : textModel;
+    const activeModelName = kind === 'image' ? imageModelName : textModelName;
+
     try {
-      return await model.generateContent(input);
+      return await activeModel.generateContent(input);
     } catch (error) {
       const fallbackModel = 'gemini-1.5-flash';
-      if (this.isModelNotSupportedError(error) && this.modelName !== fallbackModel && this.genAI) {
+      if (this.isModelNotSupportedError(error) && activeModelName !== fallbackModel) {
         logger.warn('Gemini model not supported; falling back', {
-          requestedModel: this.modelName,
+          kind,
+          requestedModel: activeModelName,
           fallbackModel,
           error: toErrorMeta(error),
         });
-        this.modelName = fallbackModel;
-        this.model = this.genAI.getGenerativeModel({ model: this.modelName });
-        return await this.model.generateContent(input);
+
+        const nextModel = genAI.getGenerativeModel({ model: fallbackModel });
+        if (kind === 'image') {
+          this.imageModelName = fallbackModel;
+          this.imageModel = nextModel;
+        } else {
+          this.textModelName = fallbackModel;
+          this.textModel = nextModel;
+        }
+
+        return await nextModel.generateContent(input);
       }
       throw error;
     }
@@ -123,7 +148,7 @@ export class AIService {
     }`;
 
     const runAnalysis = async () => {
-      const result = await this.generateContent([
+      const result = await this.generateContent('image', [
         prompt,
         {
           inlineData: {
@@ -180,7 +205,7 @@ Please respond in the following JSON format ONLY:
 }`;
 
     const runAnalysis = async () => {
-      const result = await this.generateContent(prompt);
+      const result = await this.generateContent('text', prompt);
       const text = result.response.text();
 
       try {
@@ -230,7 +255,7 @@ Return JSON ONLY:
 }`;
 
     const run = async () => {
-      const result = await this.generateContent(prompt);
+      const result = await this.generateContent('text', prompt);
       const text = result.response.text();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No valid JSON found in BMI response');
@@ -282,7 +307,7 @@ Return JSON ONLY:
 }`;
 
     const run = async () => {
-      const result = await this.generateContent(prompt);
+      const result = await this.generateContent('text', prompt);
       const text = result.response.text();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No valid JSON found in BMI range response');
@@ -334,7 +359,7 @@ Return JSON ONLY:
 }`;
 
     const run = async () => {
-      const result = await this.generateContent(prompt);
+      const result = await this.generateContent('text', prompt);
       const text = result.response.text();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No valid JSON found in calorie goal response');
@@ -389,7 +414,7 @@ ${input.recentFoods.map((m) => `- ${m.when}: ${m.food_name} (${m.calories} kcal)
 
 Give practical advice for the rest of today. Include hydration reminder, healthy fats examples, and a simple next-meal suggestion. Keep it under 8 lines.`;
 
-    const result = await this.generateContent(prompt);
+    const result = await this.generateContent('text', prompt);
     return result.response.text().trim();
   }
 
@@ -438,7 +463,7 @@ Return JSON ONLY:
   "memory": "updated compact memory (<=800 chars)"
 }`;
 
-    const result = await this.generateContent(prompt);
+    const result = await this.generateContent('text', prompt);
     const text = result.response.text();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No valid JSON found in coach response');

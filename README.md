@@ -73,7 +73,9 @@ npm run dev
    In Railway's **Variables** tab, add:
    - `TELEGRAM_BOT_TOKEN`: Your token from @BotFather
    - `GEMINI_API_KEY`: Your key from Google AI Studio
-   - `GEMINI_MODEL` (optional): Example `gemini-1.5-flash`
+   - `GEMINI_TEXT_MODEL` (recommended): Example `gemini-2.5-flash-lite`
+   - `GEMINI_IMAGE_MODEL` (recommended): Example `gemini-2.5-flash`
+   - `GEMINI_MODEL` (optional legacy): Single-model fallback
    - `DATABASE_URL`: `/app/database/calro.db` (This is already set in Dockerfile, but good to have)
    - `NODE_ENV`: `production`
 4. **Persistent Storage (CRITICAL)**:
