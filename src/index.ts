@@ -674,6 +674,79 @@ bot.hears(MENU.stats, statsHandler);
 bot.command('weekly', weeklyHandler);
 bot.hears(MENU.weekly, weeklyHandler);
 
+const deleteHandler = async (ctx: any) => {
+  const userId = ctx.from.id;
+  const entries = await nutritionService.getHistory(userId);
+  if (!entries || entries.length === 0) {
+    await ctx.reply('🗑 No recent entries to delete yet.', buildMainMenu());
+    return;
+  }
+
+  const buttons = entries.slice(0, 10).map((e) => {
+    const name = (e.food_name || 'Unknown').slice(0, 24);
+    return [Markup.button.callback(`Delete #${e.id} · ${name} · ${e.calories}kcal`, `del_pick_${e.id}`)];
+  });
+
+  await ctx.reply('🗑 Select an entry to delete:', Markup.inlineKeyboard(buttons));
+};
+
+bot.command('delete', deleteHandler);
+
+bot.action(/del_pick_(\d+)/, async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  await ctx.answerCbQuery();
+
+  const id = Number((ctx.callbackQuery as any)?.data?.match(/del_pick_(\d+)/)?.[1]);
+  if (!Number.isFinite(id)) {
+    await ctx.reply('❌ Invalid entry ID.', buildMainMenu());
+    return;
+  }
+
+  const entry = nutritionService.getEntryForUser(userId, id);
+  if (!entry) {
+    await ctx.reply('❌ Entry not found (it may already be deleted).', buildMainMenu());
+    return;
+  }
+
+  const name = entry.food_name || 'Unknown';
+  const text = `🗑 Delete this entry?\n\n#${entry.id} · ${name}\n${entry.calories} kcal · ${entry.entry_date}`;
+  await ctx.reply(
+    text,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('Yes, delete', `del_confirm_${entry.id}`)],
+      [Markup.button.callback('Cancel', `del_cancel_${entry.id}`)],
+    ])
+  );
+});
+
+bot.action(/del_cancel_(\d+)/, async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.reply('Cancelled.', buildMainMenu());
+});
+
+bot.action(/del_confirm_(\d+)/, async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  await ctx.answerCbQuery();
+
+  const id = Number((ctx.callbackQuery as any)?.data?.match(/del_confirm_(\d+)/)?.[1]);
+  if (!Number.isFinite(id)) {
+    await ctx.reply('❌ Invalid entry ID.', buildMainMenu());
+    return;
+  }
+
+  const result = nutritionService.deleteEntry(userId, id);
+  if (!result.deleted) {
+    await ctx.reply('❌ Entry not found (it may already be deleted).', buildMainMenu());
+    return;
+  }
+
+  const name = result.food_name || 'Unknown';
+  await ctx.reply(`✅ Deleted #${id} (${name}). Your daily totals are updated.`, buildMainMenu());
+  await statsHandler(ctx);
+});
+
 // /history command
 const historyHandler = async (ctx: any) => {
   const history = await nutritionService.getHistory(ctx.from.id);

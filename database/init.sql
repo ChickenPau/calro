@@ -116,3 +116,39 @@ BEGIN
     AND is_deleted = 0
     GROUP BY user_id, entry_date;
 END;
+
+CREATE TRIGGER IF NOT EXISTS update_daily_summary_after_soft_delete
+AFTER UPDATE OF is_deleted ON nutrition_entries
+FOR EACH ROW
+BEGIN
+    DELETE FROM daily_summaries
+    WHERE user_id = NEW.user_id
+      AND summary_date = NEW.entry_date
+      AND NOT EXISTS (
+        SELECT 1
+        FROM nutrition_entries
+        WHERE user_id = NEW.user_id
+          AND entry_date = NEW.entry_date
+          AND is_deleted = 0
+      );
+
+    INSERT OR REPLACE INTO daily_summaries (
+        user_id, summary_date, total_calories, total_protein_g,
+        total_carbs_g, total_fats_g, entry_count, created_at, updated_at
+    )
+    SELECT
+        user_id,
+        entry_date,
+        SUM(calories),
+        SUM(protein_g),
+        SUM(carbs_g),
+        SUM(fats_g),
+        COUNT(*),
+        COALESCE((SELECT created_at FROM daily_summaries WHERE user_id = NEW.user_id AND summary_date = NEW.entry_date), CURRENT_TIMESTAMP),
+        CURRENT_TIMESTAMP
+    FROM nutrition_entries
+    WHERE user_id = NEW.user_id
+      AND entry_date = NEW.entry_date
+      AND is_deleted = 0
+    GROUP BY user_id, entry_date;
+END;

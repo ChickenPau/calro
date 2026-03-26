@@ -160,6 +160,14 @@ export class NutritionRepository {
     return stmt.get(id) as NutritionEntry | undefined;
   }
 
+  public getActiveEntryForUserById(telegram_id: number, id: number): NutritionEntry | undefined {
+    const stmt = this.db.prepare(`
+      SELECT * FROM nutrition_entries
+      WHERE id = ? AND user_id = ? AND is_deleted = 0
+    `);
+    return stmt.get(id, telegram_id) as NutritionEntry | undefined;
+  }
+
   public getAllEntries(telegram_id: number): NutritionEntry[] {
     const stmt = this.db.prepare(`
       SELECT * FROM nutrition_entries 
@@ -174,6 +182,22 @@ export class NutritionRepository {
       UPDATE nutrition_entries SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `);
     stmt.run(id);
+  }
+
+  public softDeleteEntryForUser(telegram_id: number, id: number): NutritionEntry | null {
+    const entry = this.getActiveEntryForUserById(telegram_id, id);
+    if (!entry) return null;
+
+    const stmt = this.db.prepare(`
+      UPDATE nutrition_entries
+      SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ? AND is_deleted = 0
+    `);
+    const result = stmt.run(id, telegram_id);
+    if (result.changes === 0) return null;
+
+    this.recomputeDailySummary(telegram_id, entry.entry_date);
+    return entry;
   }
 
   public deleteAllEntriesForUser(telegram_id: number): void {

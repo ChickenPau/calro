@@ -164,6 +164,21 @@ export class NutritionService {
     return nutritionRepository.getHistory(telegram_id);
   }
 
+  public getEntryForUser(telegram_id: number, entryId: number) {
+    return nutritionRepository.getActiveEntryForUserById(telegram_id, entryId) ?? null;
+  }
+
+  public deleteEntry(telegram_id: number, entryId: number): { deleted: boolean; entry_date?: string; calories?: number; food_name?: string } {
+    const deletedEntry = nutritionRepository.softDeleteEntryForUser(telegram_id, entryId);
+    if (!deletedEntry) return { deleted: false };
+    return {
+      deleted: true,
+      entry_date: deletedEntry.entry_date,
+      calories: deletedEntry.calories,
+      food_name: deletedEntry.food_name ?? undefined,
+    };
+  }
+
   public async exportCSV(telegram_id: number): Promise<string> {
     const entries = nutritionRepository.getAllEntries(telegram_id);
     const csvStringifier = createObjectCsvStringifier({
