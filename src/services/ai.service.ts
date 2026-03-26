@@ -463,17 +463,45 @@ Return JSON ONLY:
   "memory": "updated compact memory (<=800 chars)"
 }`;
 
-    const result = await this.generateContent('text', prompt);
+    const result = await this.generateContent('text', {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    });
+
     const text = result.response.text();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No valid JSON found in coach response');
-    const jsonData = JSON.parse(jsonMatch[0]);
-    const validated = schema.parse(jsonData);
-    return {
-      reply: validated.reply.slice(0, 900),
-      more: validated.more.slice(0, 2500),
-      memory: validated.memory.slice(0, 800),
-    };
+    if (!jsonMatch) {
+      logger.warn('Coach response was not valid JSON; using plain-text fallback', {
+        preview: text.slice(0, 600),
+      });
+      return {
+        reply: text.trim().slice(0, 900) || 'Sorry — I could not generate a valid response. Please try again.',
+        more: '',
+        memory: (input.memory || '').slice(0, 800),
+      };
+    }
+
+    try {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      const validated = schema.parse(jsonData);
+      return {
+        reply: validated.reply.slice(0, 900),
+        more: validated.more.slice(0, 2500),
+        memory: validated.memory.slice(0, 800),
+      };
+    } catch (error) {
+      logger.warn('Coach JSON parse/validation failed; using plain-text fallback', {
+        error: toErrorMeta(error),
+        preview: text.slice(0, 600),
+      });
+      return {
+        reply: text.trim().slice(0, 900) || 'Sorry — I could not generate a valid response. Please try again.',
+        more: '',
+        memory: (input.memory || '').slice(0, 800),
+      };
+    }
   }
 }
 
