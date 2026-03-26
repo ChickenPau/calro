@@ -764,10 +764,14 @@ const historyHandler = async (ctx: any) => {
 🔥 ${entry.calories} kcal
 🥩 ${entry.protein_g}P / 🍞 ${entry.carbs_g}C / 🥑 ${entry.fats_g}F`;
 
+    const actions = Markup.inlineKeyboard([
+      [Markup.button.callback('🗑 Delete', `del_pick_${entry.id}`)],
+    ]);
+
     if (entry.telegram_file_id) {
-      await ctx.replyWithPhoto(entry.telegram_file_id, { caption });
+      await ctx.replyWithPhoto(entry.telegram_file_id, { caption, ...actions });
     } else {
-      await ctx.reply(caption);
+      await ctx.reply(caption, actions);
     }
   }
 };
