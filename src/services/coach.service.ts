@@ -14,6 +14,7 @@ const chunkText = (text: string, chunkSize: number): string[] => {
 
 export class CoachService {
   public async ask(telegram_id: number, userMessage: string): Promise<{ reply: string; hasMore: boolean }> {
+    await nutritionService.registerUser(telegram_id);
     const state = coachRepository.getState(telegram_id);
     const profile = nutritionService.getProfile(telegram_id) || undefined;
 
