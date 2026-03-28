@@ -18,7 +18,9 @@ class DatabaseRepository {
   }
 
   private initialize() {
-    const initScriptPath = path.resolve(process.cwd(), 'database/init.sql');
+    const initScriptPathPrimary = path.resolve(process.cwd(), 'database/init.sql');
+    const initScriptPathFallback = path.resolve(process.cwd(), 'schema/init.sql');
+    const initScriptPath = fs.existsSync(initScriptPathPrimary) ? initScriptPathPrimary : initScriptPathFallback;
     const initScript = fs.readFileSync(initScriptPath, 'utf8');
     this.db.exec(initScript);
     this.runMigrations();
