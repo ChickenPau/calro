@@ -7,6 +7,7 @@ export const MENU = {
   coach: '🧠 Coach',
   history: '📜 History',
   log: '✍️ Log meal',
+  export: '📄 Export',
   weekly: '📅 Weekly',
 } as const;
 
@@ -14,7 +15,7 @@ export const buildMainMenu = () => {
   return Markup.keyboard([
     [MENU.start, MENU.profile, MENU.stats],
     [MENU.coach, MENU.history, MENU.log],
-    [MENU.weekly],
+    [MENU.export, MENU.weekly],
   ])
     .resize()
     .oneTime(false);

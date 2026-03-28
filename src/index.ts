@@ -71,6 +71,19 @@ const sendMainMenu = async (ctx: any, text: string) => {
   await ctx.reply(text, buildMainMenu());
 };
 
+const getQuickHowTo = () => {
+  return (
+    `How to use Calro:\n` +
+    `- 📸 Send a food photo anytime to log calories + macros\n` +
+    `- ${MENU.log}: type what you ate (no photo needed)\n` +
+    `- ${MENU.stats}: see today’s totals\n` +
+    `- ${MENU.history}: review meals and tap 🗑 Delete if needed\n` +
+    `- ${MENU.coach}: ask questions (buttons or type freely)\n` +
+    `- ${MENU.weekly}: see weekly calories\n` +
+    `- ${MENU.export}: download your CSV (also works with /export)`
+  );
+};
+
 const buildCoachMenu = () => {
   return Markup.keyboard([
     [COACH_MENU.hydration, COACH_MENU.fats],
@@ -169,6 +182,8 @@ const startHandler = async (ctx: any) => {
   const { id, username, first_name, last_name } = ctx.from;
   await nutritionService.registerUser(id, username, first_name, last_name);
 
+  await ctx.reply(getQuickHowTo(), buildMainMenu());
+
   const existingProfile = nutritionService.getProfile(id);
   if (existingProfile) {
     await sendMainMenu(
@@ -201,13 +216,28 @@ bot.help((ctx) => {
       `- ${MENU.coach}\n` +
       `- ${MENU.history}\n` +
       `- ${MENU.log}\n` +
-      `- ${MENU.weekly}`,
+      `- ${MENU.export}\n` +
+      `- ${MENU.weekly}\n\n` +
+      `Extra:\n` +
+      `- /export (download CSV)\n` +
+      `- Delete meals from History using 🗑 Delete`,
     buildMainMenu()
   );
 });
 
 bot.command('menu', async (ctx) => {
   await sendMainMenu(ctx, 'Main menu:');
+});
+
+bot.hears(MENU.export, async (ctx) => {
+  try {
+    const csvContent = await nutritionService.exportCSV(ctx.from.id);
+    const buffer = Buffer.from(csvContent, 'utf-8');
+    await ctx.replyWithDocument({ source: buffer, filename: `nutrition_history_${ctx.from.id}.csv` });
+  } catch (error) {
+    logger.error('Export failed', { error, userId: ctx.from.id });
+    await ctx.reply('❌ Failed to generate CSV export.', buildMainMenu());
+  }
 });
 
 bot.command('version', async (ctx) => {
@@ -278,7 +308,7 @@ bot.action('profile_edit', async (ctx) => {
     return;
   }
   profileFlows.set(userId, { mode: 'edit', step: 'weight', display_name: profile.display_name });
-  await ctx.reply('⚖️ Enter your updated weight in kg (20–300):');
+  await ctx.reply('Enter your weight in kg');
 });
 
 bot.action('profile_goal', async (ctx) => {
@@ -525,7 +555,6 @@ bot.on(message('text'), async (ctx) => {
         Markup.inlineKeyboard([
           [Markup.button.callback('Male', 'sex_Male')],
           [Markup.button.callback('Female', 'sex_Female')],
-          [Markup.button.callback('Other', 'sex_Other')],
         ])
       );
       return;
@@ -537,7 +566,7 @@ bot.on(message('text'), async (ctx) => {
         return;
       }
       profileFlows.set(userId, { ...flow, step: 'height', weight_kg: weight });
-      await ctx.reply('📏 Enter your height in cm (100–250):');
+      await ctx.reply('Enter your height in cm');
       return;
     }
     if (flow.step === 'height') {
@@ -580,7 +609,7 @@ bot.on(message('text'), async (ctx) => {
         return;
       }
       profileFlows.set(userId, { ...flow, step: 'height', weight_kg: weight });
-      await ctx.reply('📏 Enter your updated height in cm (100–250):');
+      await ctx.reply('Enter your height in cm');
       return;
     }
     if (flow.step === 'height') {
@@ -634,16 +663,16 @@ bot.on(message('text'), async (ctx) => {
   }
 });
 
-bot.action(/sex_(Male|Female|Other)/, async (ctx) => {
+bot.action(/sex_(Male|Female)/, async (ctx) => {
   const userId = ctx.from?.id;
   if (!userId) return;
   await ctx.answerCbQuery();
-  const match = (ctx.callbackQuery as any)?.data?.match(/sex_(Male|Female|Other)/);
-  const sex = (match?.[1] as 'Male' | 'Female' | 'Other') || 'Other';
+  const match = (ctx.callbackQuery as any)?.data?.match(/sex_(Male|Female)/);
+  const sex = (match?.[1] as 'Male' | 'Female') || 'Male';
   const flow = profileFlows.get(userId);
   if (!flow || flow.mode !== 'onboarding' || flow.step !== 'sex') return;
   profileFlows.set(userId, { ...flow, sex, step: 'weight' });
-  await ctx.reply('⚖️ Enter your current weight in kg (20–300):');
+  await ctx.reply('Enter your weight in kg');
 });
 
 // Photo handler

@@ -1,121 +1,133 @@
-# AI Nutrition Coach Telegram Bot 🏃‍♂️
+# Calro — Your AI Nutrition Coach on Telegram
 
-A production-ready Telegram Bot that analyzes food photos using Google Gemini 1.5 Flash API to provide instant nutritional breakdown and running performance optimization tips.
+Calro is a friendly Telegram bot that helps you **log meals fast**, **track calories/macros**, and **get simple coaching tips**—right inside chat.
+Snap a food photo, type what you ate, or ask the Coach anything about nutrition and habits.
 
-## 🚀 Features
+---
 
-- **Photo Analysis**: Send any food photo to get Calories, Protein, Carbs, and Fats estimates.
-- **Sports Nutrition**: Get personalized tips for running performance and power-to-weight ratio.
-- **Daily Tracking**: View today's nutrition totals and macro percentages with `/stats`.
-- **History**: View your last 10 entries with `/history`.
-- **Data Export**: Download your entire history in CSV format with `/export`.
-- **Performance**: SQLite database with triggers for real-time daily summary aggregation.
-- **Security**: Rate limiting, file size validation, and input sanitization.
+## What Calro does (in 1 minute)
 
-## 🛠 Tech Stack
+- **Log a meal from a photo** → get estimated calories + macros + a short tip
+- **Log a meal from text** (e.g., “I ate laksa”) → quick estimates without a photo
+- **See today’s progress** toward your calorie goal
+- **Review history** and **delete wrong entries** (totals update immediately)
+- **Ask the Coach** using quick suggestion buttons or your own questions
 
-- **Runtime**: Node.js 18+
-- **Language**: TypeScript
-- **Bot Framework**: Telegraf
-- **Database**: SQLite (better-sqlite3)
-- **AI**: Google Gemini 1.5 Flash
-- **Logging**: Winston
-- **Validation**: Zod
-- **Date Handling**: date-fns
+---
 
-## 📋 Prerequisites
+## Goals (why this exists)
 
-- Node.js 18 or higher
-- Telegram Bot Token (from [@BotFather](https://t.me/botfather))
-- Google Gemini API Key (from [Google AI Studio](https://aistudio.google.com/))
+- Make meal logging **effortless** (no extra app, no spreadsheets)
+- Give you **useful feedback** (calories/macros + coaching in plain language)
+- Keep daily totals **accurate and up to date** (including after deletions)
+- Run smoothly in production (Docker + Railway deployment ready)
 
-## ⚙️ Setup
+---
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd calro
-   ```
+## What’s included (features)
 
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+### Meal logging
+- **Photo logging** with Gemini image analysis
+- **Text logging** for quick manual entries
+- Safety checks like **rate limiting** and **image size validation**
 
-3. **Configure environment variables**:
-   Copy `.env.example` to `.env` and fill in your keys:
-   ```bash
-   cp .env.example .env
-   ```
+### Tracking
+- **Daily stats**: calories, macros, and a progress bar
+- **Weekly view**: a quick look at recent calorie totals
 
-4. **Build the project**:
-   ```bash
-   npm run build
-   ```
+### History (fix mistakes easily)
+- Shows your recent meals
+- Each entry includes a **🗑 Delete** button
+- A **confirmation step** prevents accidental deletion
+- After deletion, your **daily totals recalculate immediately** and stay correct in the database
 
-5. **Start the bot**:
-   ```bash
-   npm start
-   ```
+### Coach mode (dual input)
+- A **suggestion panel** with quick question buttons
+- You can also **type freely anytime**
+- Conversation stays consistent because the bot keeps your **coach memory/context**
 
-For development:
-```bash
-npm run dev
-```
+### Export
+- Download your history as **CSV** via the **📄 Export** button or `/export`
 
-## 🚂 Railway Deployment (Recommended)
+---
 
-1. **Push code to GitHub**: Create a private repository and push your project.
-2. **Connect to Railway**:
-   - Go to [Railway.app](https://railway.app/) and create a new project.
-   - Connect your GitHub repository.
-3. **Configure Environment Variables**:
-   In Railway's **Variables** tab, add:
-   - `TELEGRAM_BOT_TOKEN`: Your token from @BotFather
-   - `GEMINI_API_KEY`: Your key from Google AI Studio
-   - `GEMINI_TEXT_MODEL` (recommended): Example `gemini-2.5-flash-lite`
-   - `GEMINI_IMAGE_MODEL` (recommended): Example `gemini-2.5-flash`
-   - `GEMINI_MODEL` (optional legacy): Single-model fallback
-   - `DATABASE_URL`: `/app/database/calro.db` (This is already set in Dockerfile, but good to have)
-   - `NODE_ENV`: `production`
-4. **Persistent Storage (CRITICAL)**:
-   - Go to the **Volumes** tab in your Railway service.
-   - Click **Add Volume**.
-   - Set the mount path to: `/app/database`
-   - This ensures your nutrition data isn't deleted when the bot restarts.
+## How it works (friendly architecture overview)
 
-## 🧪 Testing
+Calro has 4 main pieces:
 
-```bash
-npm test
-```
+1) **Telegram Bot (Telegraf)**
+Handles commands, messages, photos, and button taps.
 
-## 🐳 Docker Deployment
+2) **AI Layer (Gemini)**
+- Uses a **text model** for chat + text logging
+- Uses a **stronger image model** for photo recognition
 
-1. **Build the image**:
-   ```bash
-   docker build -t ai-nutrition-coach .
-   ```
+3) **Database (SQLite)**
+Stores your profile, meals, and coach memory.
+Daily totals are stored as a “daily summary” so stats are fast.
 
-2. **Run the container**:
-   ```bash
-   docker run -d \
-     --name calro-bot \
-     -e TELEGRAM_BOT_TOKEN=your_token \
-     -e GEMINI_API_KEY=your_key \
-     -v $(pwd)/database:/app/database \
-     ai-nutrition-coach
-   ```
+4) **Health endpoint (Express)**
+Railway can check `GET /health` to confirm the service is alive.
 
-## 📂 Project Structure
+---
 
-- `src/index.ts`: Main entry point and bot controllers.
-- `src/services/`: Business logic and AI integration.
-- `src/repositories/`: Data access layer for SQLite.
-- `src/models/`: TypeScript interfaces and validation schemas.
-- `database/init.sql`: SQL schema and triggers.
-- `tests/`: Unit tests.
+## Your main commands (Telegram)
 
-## 📄 License
+- `/start` — start / restart onboarding
+- `/profile` — view or update your profile
+- `/stats` — today’s totals
+- `/weekly` — weekly calorie summary
+- `/history` — recent meals (with delete buttons)
+- `/export` — download your log as CSV
+- `/coach` — coach mode (buttons + free text)
 
-ISC
+---
+
+## Tech stack (what we’re using)
+
+- **Node.js** (Docker uses Node 18 Alpine)
+- **TypeScript**
+- **Telegraf** (Telegram bot framework)
+- **Google Gemini** via `@google/generative-ai`
+- **SQLite** via `better-sqlite3`
+- **Winston** logging
+- **Zod** validation
+- **Axios** (download images from Telegram)
+- **date-fns**, **csv-writer**
+- **Docker** + **Railway**
+- **Jest** tests + GitHub Actions CI
+
+---
+
+## Configuration (environment variables)
+
+### Required
+- `TELEGRAM_BOT_TOKEN`
+
+### For AI
+- `GEMINI_API_KEY`
+
+Recommended (fast + cost-friendly routing):
+- `GEMINI_TEXT_MODEL` (example: `gemini-2.5-flash-lite`)
+- `GEMINI_IMAGE_MODEL` (example: `gemini-2.5-flash`)
+
+Optional:
+- `GEMINI_MODEL` (legacy single-model fallback)
+- `DATABASE_URL` (default: `database/calro.db`)
+- `PORT` (default: `3000`)
+- `LOG_LEVEL` (default: `info`)
+- `NODE_ENV`
+
+---
+
+## Railway notes (important)
+
+- Use **1 replica** for Telegram polling bots. More than one instance can cause `409 Conflict`.
+- Add a **Volume** mounted at `/app/database` so your SQLite data doesn’t reset on redeploy.
+- Redeploy after updating variables so the bot picks up changes.
+
+---
+
+## A quick note about accuracy
+
+Calorie and macro estimates are best-effort. Portion size and photo clarity matter, so treat results as helpful guidance—not medical advice.
