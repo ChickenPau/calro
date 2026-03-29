@@ -85,6 +85,7 @@ export class NutritionService {
   }
 
   public async processFoodPhoto(telegram_id: number, imageBase64: string, mimeType: string, userDescription?: string, telegram_file_id?: string): Promise<{ data: NutritionData; entry_date: string }> {
+    await this.registerUser(telegram_id);
     const { data, rawResponse } = await aiService.analyzeFoodImage(imageBase64, mimeType, userDescription);
     const entry_date = formatYmdInUtcOffset(new Date());
 
@@ -108,6 +109,7 @@ export class NutritionService {
   }
 
   public async processFoodText(telegram_id: number, description: string): Promise<{ data: NutritionData; entry_date: string }> {
+    await this.registerUser(telegram_id);
     const { data, rawResponse } = await aiService.analyzeFoodText(description);
     const entry_date = formatYmdInUtcOffset(new Date());
 

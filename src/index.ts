@@ -134,6 +134,9 @@ const getUserFacingAnalysisError = (error: unknown): string => {
   }
 
   if (lower.includes('sqlite') || lower.includes('no such column') || lower.includes('constraint failed')) {
+    if (lower.includes('foreign key')) {
+      return '❌ Database error while saving your entry. Please tap 🚀 Start once, then try again.';
+    }
     return '❌ Database error while saving your entry. Please try again; if it persists, the database schema may need migration.';
   }
 
