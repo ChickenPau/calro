@@ -7,15 +7,15 @@ export const NutritionDataSchema = z.object({
   carbs_g: z.number(),
   fats_g: z.number(),
   ai_tip: z.string(),
-  dish_identified: z.string().optional(),
+  dish_identified: z.string().nullish(),
   breakdown_kcal: z
     .object({
-      rice_carbs: z.number().optional(),
-      meat_protein: z.number().optional(),
-      sauce_extras: z.number().optional(),
+      rice_carbs: z.number().nullish(),
+      meat_protein: z.number().nullish(),
+      sauce_extras: z.number().nullish(),
     })
-    .optional(),
-  clarification_question: z.string().optional(),
+    .nullish(),
+  clarification_question: z.string().nullish(),
 });
 
 export type NutritionData = z.infer<typeof NutritionDataSchema>;

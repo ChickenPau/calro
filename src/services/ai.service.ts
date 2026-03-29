@@ -216,6 +216,18 @@ Return JSON ONLY in this schema:
           throw new Error('No valid JSON found in AI response');
         }
         const jsonData = JSON.parse(jsonMatch[0]);
+
+        if (jsonData && typeof jsonData === 'object') {
+          if (jsonData.clarification_question === null) delete jsonData.clarification_question;
+          if (jsonData.dish_identified === null) delete jsonData.dish_identified;
+          if (jsonData.breakdown_kcal === null) delete jsonData.breakdown_kcal;
+          if (jsonData.breakdown_kcal && typeof jsonData.breakdown_kcal === 'object') {
+            if (jsonData.breakdown_kcal.rice_carbs === null) delete jsonData.breakdown_kcal.rice_carbs;
+            if (jsonData.breakdown_kcal.meat_protein === null) delete jsonData.breakdown_kcal.meat_protein;
+            if (jsonData.breakdown_kcal.sauce_extras === null) delete jsonData.breakdown_kcal.sauce_extras;
+          }
+        }
+
         if (typeof jsonData.food_name !== 'string' || jsonData.food_name.trim().length === 0) {
           jsonData.food_name = userDescription && userDescription.trim().length > 0 ? userDescription.trim().slice(0, 80) : 'Unknown';
         }
