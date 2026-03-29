@@ -138,9 +138,9 @@ const buildFoodAnalysisMessage = (data: any): { text: string; parse_mode: 'Markd
   const text =
     `🍽️ Dish Identified: *${dish}*\n\n` +
     `📊 Breakdown:\n` +
-    `- Rice/Carbs: ${escapeMarkdown(rice)} kcal\n` +
-    `- Meat/Protein: ${escapeMarkdown(meat)} kcal\n` +
-    `- Sauce/Extras: ${escapeMarkdown(sauce)} kcal\n\n` +
+    `• Rice/Carbs: ${escapeMarkdown(rice)} kcal\n` +
+    `• Meat/Protein: ${escapeMarkdown(meat)} kcal\n` +
+    `• Sauce/Extras: ${escapeMarkdown(sauce)} kcal\n\n` +
     `🔥 Total Calories: *${escapeMarkdown(total)}* kcal` +
     question;
 
