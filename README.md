@@ -62,6 +62,30 @@ Handles commands, messages, photos, and button taps.
 - Uses a **text model** for chat + text logging
 - Uses a **stronger image model** for photo recognition
 
+### Our Gemini guide rules (food photos)
+When you send a food photo, we instruct Gemini to follow these rules to keep results consistent and “local-aware”:
+
+- **Identify the dish first** (especially Singapore hawker staples, but also Western/Indian/Chinese/other cuisines)
+- **Use HPB-style baselines** when possible (example: a standard Duck Rice is around ~700 kcal), then adjust based on what’s shown
+- **Scale by portion cues** (spoon/chopsticks/bowl or plate rim) to estimate serving size
+- **Portion sanity cap**: a normal single-person meal should not exceed **900 kcal** unless it clearly looks like a large sharing portion
+- **If unclear/blurry**: ask a short clarification question instead of guessing wildly
+
+For reliability, the bot asks Gemini to return a **strict JSON** response (dish name + kcal breakdown + total + optional clarification question). The bot then formats it into a clean Telegram message.
+
+Example output (what you’ll see in Telegram):
+
+```text
+🍽️ Dish Identified: Roasted Duck Rice
+
+📊 Breakdown:
+• Rice/Carbs: 320 kcal
+• Meat/Protein: 280 kcal
+• Sauce/Extras: 80 kcal
+
+🔥 Total Calories: 680 kcal
+```
+
 3) **Database (SQLite)**
 Stores your profile, meals, and coach memory.
 Daily totals are stored as a “daily summary” so stats are fast.
