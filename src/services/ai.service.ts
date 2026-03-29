@@ -27,6 +27,19 @@ const toErrorMeta = (error: unknown) => {
   };
 };
 
+const normalizeModelName = (value: string): string => {
+  let v = String(value || '').trim();
+  if (!v) return v;
+  v = v.replace(/^models\//i, '');
+  const colonIndex = v.indexOf(':');
+  if (colonIndex >= 0) v = v.slice(0, colonIndex);
+  v = v.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+  v = v.replace(/[_\s]+/g, '-').toLowerCase();
+  v = v.replace(/[^a-z0-9.\-]/g, '-');
+  v = v.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  return v;
+};
+
 const retry = async <T>(
   run: () => Promise<T>,
   options: {
@@ -73,8 +86,8 @@ export class AIService {
     }
 
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
-    this.textModelName = config.gemini.textModel;
-    this.imageModelName = config.gemini.imageModel;
+    this.textModelName = normalizeModelName(config.gemini.textModel);
+    this.imageModelName = normalizeModelName(config.gemini.imageModel);
     this.textModel = this.genAI.getGenerativeModel({ model: this.textModelName });
     this.imageModel = this.genAI.getGenerativeModel({ model: this.imageModelName });
   }
@@ -96,7 +109,12 @@ export class AIService {
     const anyErr = error as any;
     const status = anyErr?.status ?? anyErr?.response?.status;
     const message = String(anyErr?.message || '').toLowerCase();
-    return status === 404 || message.includes('not found') || message.includes('not supported for generatecontent');
+    return (
+      status === 404 ||
+      (status === 400 && message.includes('unexpected model name format')) ||
+      message.includes('not found') ||
+      message.includes('not supported for generatecontent')
+    );
   }
 
   private async generateContent(kind: 'text' | 'image', input: any): Promise<any> {
