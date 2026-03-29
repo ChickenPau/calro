@@ -399,7 +399,7 @@ bot.hears(MENU.coach, coachEnterHandler);
 
 const runCoachAsk = async (ctx: any, userMessage: string) => {
   const userId = ctx.from.id;
-  const thinkingMsg = await ctx.reply('🤔 thinking...');
+  const thinkingMsg = await ctx.reply('🔎 analysing...');
   try {
     const { reply, hasMore } = await coachService.ask(userId, userMessage);
     const buttons: any[] = [];
@@ -551,7 +551,7 @@ bot.on(message('text'), async (ctx) => {
   if (flow.mode === 'text_meal') {
     const description = text.slice(0, 500);
     profileFlows.delete(userId);
-    const thinkingMsg = await ctx.reply('🤔 thinking...');
+    const thinkingMsg = await ctx.reply('🔎 analysing...');
     try {
       const { data } = await nutritionService.processFoodText(userId, description);
       const messageText = `📊 Nutrition (from text):
@@ -614,7 +614,7 @@ bot.on(message('text'), async (ctx) => {
       const weight_kg = flow.weight_kg ?? 0;
       profileFlows.delete(userId);
       
-      const thinkingMsg = await ctx.reply('🤔 thinking...');
+      const thinkingMsg = await ctx.reply('🔎 analysing...');
       
       const profile = await nutritionService.setProfile(userId, display_name, age_years, sex, weight_kg, height);
       const bar = weightProgressBar(profile.weight_kg, profile.target_weight_high_kg);
@@ -657,7 +657,7 @@ bot.on(message('text'), async (ctx) => {
       const age_years = existing?.age_years ?? 30;
       const sex = existing?.sex ?? 'Other';
       
-      const thinkingMsg = await ctx.reply('🤔 thinking...');
+      const thinkingMsg = await ctx.reply('🔎 analysing...');
       
       const profile = await nutritionService.setProfile(userId, flow.display_name, age_years, sex, weight_kg, height);
       const bar = weightProgressBar(profile.weight_kg, profile.target_weight_high_kg);
@@ -726,7 +726,7 @@ bot.on(message('photo'), async (ctx) => {
 
   const fileLink = await bot.telegram.getFileLink(photo.file_id);
   
-  const thinkingMsg = await ctx.reply('🤔 thinking...');
+  const thinkingMsg = await ctx.reply('🔎 analysing...');
 
   try {
     const response = await axios.get(fileLink.toString(), { responseType: 'arraybuffer' });

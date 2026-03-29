@@ -27,8 +27,8 @@ Snap a food photo, type what you ate, or ask the Coach anything about nutrition 
 ## What’s included (features)
 
 ### Meal logging
-- **Photo logging** with Gemini image analysis
-- **Text logging** for quick manual entries
+- **Photo logging** with Google Gemini (food photo analysis)
+- **Text logging** with Google Gemini (quick manual entries)
 - Safety checks like **rate limiting** and **image size validation**
 
 ### Tracking
@@ -61,6 +61,8 @@ Handles commands, messages, photos, and button taps.
 2) **AI Layer (Gemini)**
 - Uses a **text model** for chat + text logging
 - Uses a **stronger image model** for photo recognition
+
+In this project we use **Gemini 2.5 Flash** for photo analysis and **Gemini 2.5 Flash Lite** for most text-based tasks (faster + cheaper), configured via environment variables.
 
 ### Our Gemini guide rules (food photos)
 When you send a food photo, we instruct Gemini to follow these rules to keep results consistent and “local-aware”:
