@@ -108,8 +108,8 @@ Railway can check `GET /health` to confirm the service is alive.
 - `GEMINI_API_KEY`
 
 Recommended (fast + cost-friendly routing):
-- `GEMINI_TEXT_MODEL` (example: `gemini-2.5-flash-lite`)
-- `GEMINI_IMAGE_MODEL` (example: `gemini-2.5-flash`)
+- `GEMINI_TEXT_MODEL` (example: `gemini-3-flash-lite`)
+- `GEMINI_IMAGE_MODEL` (example: `gemini-3-flash`)
 
 Optional:
 - `GEMINI_MODEL` (legacy single-model fallback)

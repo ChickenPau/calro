@@ -117,6 +117,36 @@ const getErrorMessage = (error: unknown): string => {
   return JSON.stringify(anyErr);
 };
 
+const escapeMarkdown = (s: string): string => {
+  return s.replace(/([_\*\[\]\(\)~`>#+\-=|{}.!\\])/g, '\\$1');
+};
+
+const formatKcal = (n: unknown): string => {
+  const x = typeof n === 'number' ? n : Number(n);
+  return Number.isFinite(x) ? `${Math.round(x)}` : '—';
+};
+
+const buildFoodAnalysisMessage = (data: any): { text: string; parse_mode: 'MarkdownV2' } => {
+  const dish = escapeMarkdown(String(data?.dish_identified || data?.food_name || 'Unknown'));
+  const rice = formatKcal(data?.breakdown_kcal?.rice_carbs);
+  const meat = formatKcal(data?.breakdown_kcal?.meat_protein);
+  const sauce = formatKcal(data?.breakdown_kcal?.sauce_extras);
+  const total = formatKcal(data?.calories);
+  const questionRaw = typeof data?.clarification_question === 'string' ? data.clarification_question.trim() : '';
+  const question = questionRaw ? `\n\n❓ ${escapeMarkdown(questionRaw)}` : '';
+
+  const text =
+    `🍽️ Dish Identified: *${dish}*\n\n` +
+    `📊 Breakdown:\n` +
+    `- Rice/Carbs: ${escapeMarkdown(rice)} kcal\n` +
+    `- Meat/Protein: ${escapeMarkdown(meat)} kcal\n` +
+    `- Sauce/Extras: ${escapeMarkdown(sauce)} kcal\n\n` +
+    `🔥 Total Calories: *${escapeMarkdown(total)}* kcal` +
+    question;
+
+  return { text, parse_mode: 'MarkdownV2' };
+};
+
 const getUserFacingAnalysisError = (error: unknown): string => {
   const message = getErrorMessage(error);
   const lower = message.toLowerCase();
@@ -706,15 +736,10 @@ bot.on(message('photo'), async (ctx) => {
 
     const { data } = await nutritionService.processFoodPhoto(userId, base64, mimeType, userDescription, photo.file_id);
 
-    const messageText = `📊 Nutrition Analysis:
-🍽 Food: ${data.food_name}
-🔥 Calories: ${data.calories}
-🥩 Protein: ${data.protein_g}g
-🍞 Carbs: ${data.carbs_g}g
-🥑 Fats: ${data.fats_g}g`;
+    const { text: messageText } = buildFoodAnalysisMessage(data);
 
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
-    await ctx.reply(messageText, buildMainMenu());
+    await (ctx as any).replyWithMarkdownV2(messageText, buildMainMenu());
   } catch (error) {
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
     const message = getErrorMessage(error);

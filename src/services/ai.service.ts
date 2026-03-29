@@ -133,30 +133,61 @@ export class AIService {
   }
 
   public async analyzeFoodImage(imageBase64: string, mimeType: string, userDescription?: string): Promise<{ data: NutritionData; rawResponse: string }> {
-    const instruction = 'You are an expert sports nutritionist. Analyze the food image provided. Estimate the portion size and provide a macro breakdown: Total Calories, Protein (g), Carbohydrates (g), and Fats (g). Output the data in a clean format and include a short, encouraging coaching tip tailored to optimizing power-to-weight ratio and athletic performance.';
-    const prompt = `${instruction}
-    ${userDescription ? `The user provided the following description: "${userDescription}". Use this information to improve your recognition of the food in the image.` : ''}
+    const instruction =
+      'You are a specialized Singaporean Nutritionist AI. Your task is to analyze images of food (primarily Singaporean hawker food, but also Western, Indian, Chinese, and other cuisines) and provide an accurate calorie estimate.';
 
-    Please respond in the following JSON format ONLY:
-    {
-      "food_name": "string",
-      "calories": number,
-      "protein_g": number,
-      "carbs_g": number,
-      "fats_g": number,
-      "ai_tip": "string"
-    }`;
+    const rules = `CRITICAL RULES:
+1) Identify the Dish: First identify if the dish is a standard hawker meal (e.g., Roasted Duck Rice, Char Siew Rice) or other cuisines.
+2) Reference Standards: Use Singapore Health Promotion Board (HPB) style baselines where possible (e.g., standard Duck Rice ~700 kcal) and adjust from there.
+3) Visual Scaling: Use the size of the spoon, chopsticks, bowl/plate rim to estimate portion size.
+4) Portion Sanity: If it looks like a standard single-person portion, DO NOT exceed 900 kcal unless it is clearly a massive sharing platter.
+5) If blurry/unclear: ask a short clarification question.`;
+
+    const prompt = `${instruction}
+
+${rules}
+
+${userDescription ? `User description: "${userDescription}"` : ''}
+
+Think step-by-step privately. Do not include your internal reasoning in the output.
+
+Return JSON ONLY in this schema:
+{
+  "dish_identified": "string",
+  "food_name": "string",
+  "breakdown_kcal": {
+    "rice_carbs": number,
+    "meat_protein": number,
+    "sauce_extras": number
+  },
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fats_g": number,
+  "ai_tip": "string",
+  "clarification_question": "string"
+}`;
 
     const runAnalysis = async () => {
-      const result = await this.generateContent('image', [
-        prompt,
-        {
-          inlineData: {
-            data: imageBase64,
-            mimeType,
+      const result = await this.generateContent('image', {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  data: imageBase64,
+                  mimeType,
+                },
+              },
+            ],
           },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
         },
-      ]);
+      });
       const response = await result.response;
       const text = response.text();
       
