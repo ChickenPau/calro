@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS nutrition_entries (
     carbs_g REAL NOT NULL,
     fats_g REAL NOT NULL,
     ai_tip TEXT,
+    ingredients_json TEXT,
     ai_raw_response TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

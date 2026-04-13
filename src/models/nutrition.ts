@@ -16,6 +16,15 @@ export const NutritionDataSchema = z.object({
     })
     .nullish(),
   clarification_question: z.string().nullish(),
+  ingredients: z
+    .array(
+      z.object({
+        name: z.string(),
+        grams: z.number().nullish(),
+        calories: z.number().nullish(),
+      })
+    )
+    .nullish(),
 });
 
 export type NutritionData = z.infer<typeof NutritionDataSchema>;
@@ -33,6 +42,7 @@ export interface NutritionEntry {
   carbs_g: number;
   fats_g: number;
   ai_tip: string;
+  ingredients_json?: string;
   ai_raw_response: string;
   created_at: string;
   updated_at: string;

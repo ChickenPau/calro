@@ -178,6 +178,13 @@ Return JSON ONLY in this schema:
     "meat_protein": number,
     "sauce_extras": number
   },
+  "ingredients": [
+    {
+      "name": "string",
+      "grams": number,
+      "calories": number
+    }
+  ],
   "calories": number,
   "protein_g": number,
   "carbs_g": number,
@@ -221,10 +228,21 @@ Return JSON ONLY in this schema:
           if (jsonData.clarification_question === null) delete jsonData.clarification_question;
           if (jsonData.dish_identified === null) delete jsonData.dish_identified;
           if (jsonData.breakdown_kcal === null) delete jsonData.breakdown_kcal;
+          if (jsonData.ingredients === null) delete jsonData.ingredients;
           if (jsonData.breakdown_kcal && typeof jsonData.breakdown_kcal === 'object') {
             if (jsonData.breakdown_kcal.rice_carbs === null) delete jsonData.breakdown_kcal.rice_carbs;
             if (jsonData.breakdown_kcal.meat_protein === null) delete jsonData.breakdown_kcal.meat_protein;
             if (jsonData.breakdown_kcal.sauce_extras === null) delete jsonData.breakdown_kcal.sauce_extras;
+          }
+
+          if (Array.isArray(jsonData.ingredients)) {
+            jsonData.ingredients = jsonData.ingredients
+              .filter((i: any) => i && typeof i === 'object')
+              .map((i: any) => {
+                if (i.grams === null) delete i.grams;
+                if (i.calories === null) delete i.calories;
+                return i;
+              });
           }
         }
 
@@ -262,11 +280,23 @@ Please respond in the following JSON format ONLY:
   "protein_g": number,
   "carbs_g": number,
   "fats_g": number,
+  "ingredients": [
+    {
+      "name": "string",
+      "grams": number,
+      "calories": number
+    }
+  ],
   "ai_tip": "string"
 }`;
 
     const runAnalysis = async () => {
-      const result = await this.generateContent('text', prompt);
+      const result = await this.generateContent('text', {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
+      });
       const text = result.response.text();
 
       try {
@@ -275,6 +305,20 @@ Please respond in the following JSON format ONLY:
           throw new Error('No valid JSON found in AI response');
         }
         const jsonData = JSON.parse(jsonMatch[0]);
+
+        if (jsonData && typeof jsonData === 'object') {
+          if (jsonData.ingredients === null) delete jsonData.ingredients;
+          if (Array.isArray(jsonData.ingredients)) {
+            jsonData.ingredients = jsonData.ingredients
+              .filter((i: any) => i && typeof i === 'object')
+              .map((i: any) => {
+                if (i.grams === null) delete i.grams;
+                if (i.calories === null) delete i.calories;
+                return i;
+              });
+          }
+        }
+
         if (typeof jsonData.food_name !== 'string' || jsonData.food_name.trim().length === 0) {
           jsonData.food_name = description.trim().slice(0, 80);
         }

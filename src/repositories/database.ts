@@ -36,6 +36,9 @@ class DatabaseRepository {
     if (!nutritionColNames.has('food_name')) {
       this.db.exec(`ALTER TABLE nutrition_entries ADD COLUMN food_name TEXT`);
     }
+    if (!nutritionColNames.has('ingredients_json')) {
+      this.db.exec(`ALTER TABLE nutrition_entries ADD COLUMN ingredients_json TEXT`);
+    }
 
     const userCols = this.db.prepare(`PRAGMA table_info(users)`).all() as Array<{ name: string }>;
     const userColNames = new Set(userCols.map((c) => c.name));

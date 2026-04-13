@@ -9,10 +9,35 @@ class NutritionRepository {
     addEntry(entry) {
         const stmt = this.db.prepare(`
       INSERT INTO nutrition_entries (
-        user_id, telegram_id, entry_date, image_url, telegram_file_id, food_name, calories, protein_g, carbs_g, fats_g, ai_tip, ai_raw_response
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        user_id, telegram_id, entry_date, image_url, telegram_file_id, food_name, calories, protein_g, carbs_g, fats_g, ai_tip, ingredients_json, ai_raw_response
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-        stmt.run(entry.user_id, entry.telegram_id, entry.entry_date, entry.image_url, entry.telegram_file_id, entry.food_name, entry.calories, entry.protein_g, entry.carbs_g, entry.fats_g, entry.ai_tip, entry.ai_raw_response);
+        const result = stmt.run(entry.user_id, entry.telegram_id, entry.entry_date, entry.image_url, entry.telegram_file_id, entry.food_name, entry.calories, entry.protein_g, entry.carbs_g, entry.fats_g, entry.ai_tip, entry.ingredients_json, entry.ai_raw_response);
+        return Number(result.lastInsertRowid);
+    }
+    updateEntryForUser(telegram_id, id, patch) {
+        const entry = this.getActiveEntryForUserById(telegram_id, id);
+        if (!entry)
+            return null;
+        const stmt = this.db.prepare(`
+      UPDATE nutrition_entries
+      SET
+        food_name = ?,
+        calories = ?,
+        protein_g = ?,
+        carbs_g = ?,
+        fats_g = ?,
+        ai_tip = ?,
+        ingredients_json = ?,
+        ai_raw_response = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ? AND is_deleted = 0
+    `);
+        const result = stmt.run(patch.food_name, patch.calories, patch.protein_g, patch.carbs_g, patch.fats_g, patch.ai_tip, patch.ingredients_json, patch.ai_raw_response, id, telegram_id);
+        if (result.changes === 0)
+            return null;
+        this.recomputeDailySummary(telegram_id, entry.entry_date);
+        return this.getActiveEntryForUserById(telegram_id, id) ?? null;
     }
     pruneToLastMeals(telegram_id, keep = 10) {
         if (keep <= 0)
@@ -108,6 +133,13 @@ class NutritionRepository {
     `);
         return stmt.get(id);
     }
+    getActiveEntryForUserById(telegram_id, id) {
+        const stmt = this.db.prepare(`
+      SELECT * FROM nutrition_entries
+      WHERE id = ? AND user_id = ? AND is_deleted = 0
+    `);
+        return stmt.get(id, telegram_id);
+    }
     getAllEntries(telegram_id) {
         const stmt = this.db.prepare(`
       SELECT * FROM nutrition_entries 
@@ -121,6 +153,21 @@ class NutritionRepository {
       UPDATE nutrition_entries SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `);
         stmt.run(id);
+    }
+    softDeleteEntryForUser(telegram_id, id) {
+        const entry = this.getActiveEntryForUserById(telegram_id, id);
+        if (!entry)
+            return null;
+        const stmt = this.db.prepare(`
+      UPDATE nutrition_entries
+      SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ? AND is_deleted = 0
+    `);
+        const result = stmt.run(id, telegram_id);
+        if (result.changes === 0)
+            return null;
+        this.recomputeDailySummary(telegram_id, entry.entry_date);
+        return entry;
     }
     deleteAllEntriesForUser(telegram_id) {
         const stmt = this.db.prepare(`DELETE FROM nutrition_entries WHERE user_id = ?`);

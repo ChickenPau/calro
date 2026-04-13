@@ -19,7 +19,9 @@ class DatabaseRepository {
         this.initialize();
     }
     initialize() {
-        const initScriptPath = path_1.default.resolve(process.cwd(), 'database/init.sql');
+        const initScriptPathPrimary = path_1.default.resolve(process.cwd(), 'database/init.sql');
+        const initScriptPathFallback = path_1.default.resolve(process.cwd(), 'schema/init.sql');
+        const initScriptPath = fs_1.default.existsSync(initScriptPathPrimary) ? initScriptPathPrimary : initScriptPathFallback;
         const initScript = fs_1.default.readFileSync(initScriptPath, 'utf8');
         this.db.exec(initScript);
         this.runMigrations();
@@ -32,6 +34,9 @@ class DatabaseRepository {
         }
         if (!nutritionColNames.has('food_name')) {
             this.db.exec(`ALTER TABLE nutrition_entries ADD COLUMN food_name TEXT`);
+        }
+        if (!nutritionColNames.has('ingredients_json')) {
+            this.db.exec(`ALTER TABLE nutrition_entries ADD COLUMN ingredients_json TEXT`);
         }
         const userCols = this.db.prepare(`PRAGMA table_info(users)`).all();
         const userColNames = new Set(userCols.map((c) => c.name));

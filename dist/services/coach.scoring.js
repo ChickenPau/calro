@@ -32,7 +32,7 @@ const scoreCoachRelevance = (query, reply) => {
         'meal',
         'snack',
     ];
-    const qImportant = new Set([...q].filter((t) => nutritionTerms.includes(t) || t.length > 4));
+    const qImportant = new Set([...q].filter((t) => nutritionTerms.includes(t)));
     if (qImportant.size === 0)
         return 0.85;
     let hit = 0;

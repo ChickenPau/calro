@@ -9,13 +9,13 @@ export class NutritionRepository {
     this.db = databaseRepository.getDb();
   }
 
-  public addEntry(entry: Omit<NutritionEntry, 'id' | 'created_at' | 'updated_at' | 'is_deleted'>): void {
+  public addEntry(entry: Omit<NutritionEntry, 'id' | 'created_at' | 'updated_at' | 'is_deleted'>): number {
     const stmt = this.db.prepare(`
       INSERT INTO nutrition_entries (
-        user_id, telegram_id, entry_date, image_url, telegram_file_id, food_name, calories, protein_g, carbs_g, fats_g, ai_tip, ai_raw_response
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        user_id, telegram_id, entry_date, image_url, telegram_file_id, food_name, calories, protein_g, carbs_g, fats_g, ai_tip, ingredients_json, ai_raw_response
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(
+    const result = stmt.run(
       entry.user_id,
       entry.telegram_id,
       entry.entry_date,
@@ -27,8 +27,51 @@ export class NutritionRepository {
       entry.carbs_g,
       entry.fats_g,
       entry.ai_tip,
+      entry.ingredients_json,
       entry.ai_raw_response
     );
+
+    return Number(result.lastInsertRowid);
+  }
+
+  public updateEntryForUser(
+    telegram_id: number,
+    id: number,
+    patch: Pick<NutritionEntry, 'food_name' | 'calories' | 'protein_g' | 'carbs_g' | 'fats_g' | 'ai_tip' | 'ingredients_json' | 'ai_raw_response'>
+  ): NutritionEntry | null {
+    const entry = this.getActiveEntryForUserById(telegram_id, id);
+    if (!entry) return null;
+
+    const stmt = this.db.prepare(`
+      UPDATE nutrition_entries
+      SET
+        food_name = ?,
+        calories = ?,
+        protein_g = ?,
+        carbs_g = ?,
+        fats_g = ?,
+        ai_tip = ?,
+        ingredients_json = ?,
+        ai_raw_response = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ? AND is_deleted = 0
+    `);
+    const result = stmt.run(
+      patch.food_name,
+      patch.calories,
+      patch.protein_g,
+      patch.carbs_g,
+      patch.fats_g,
+      patch.ai_tip,
+      patch.ingredients_json,
+      patch.ai_raw_response,
+      id,
+      telegram_id
+    );
+    if (result.changes === 0) return null;
+
+    this.recomputeDailySummary(telegram_id, entry.entry_date);
+    return this.getActiveEntryForUserById(telegram_id, id) ?? null;
   }
 
   public pruneToLastMeals(telegram_id: number, keep: number = 10): void {

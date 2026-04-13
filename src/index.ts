@@ -54,7 +54,8 @@ type ProfileFlow =
     }
   | { mode: 'edit'; step: 'weight' | 'height'; display_name: string; weight_kg?: number }
   | { mode: 'goal'; step: 'calories' }
-  | { mode: 'text_meal'; step: 'description' };
+  | { mode: 'text_meal'; step: 'description' }
+  | { mode: 'fix_photo'; entry_id: number };
 
 const profileFlows = new Map<number, ProfileFlow>();
 const coachSessions = new Set<number>();
@@ -128,20 +129,49 @@ const formatKcal = (n: unknown): string => {
 
 const buildFoodAnalysisMessage = (data: any): { text: string; parse_mode: 'MarkdownV2' } => {
   const dish = escapeMarkdown(String(data?.dish_identified || data?.food_name || 'Unknown'));
-  const rice = formatKcal(data?.breakdown_kcal?.rice_carbs);
-  const meat = formatKcal(data?.breakdown_kcal?.meat_protein);
-  const sauce = formatKcal(data?.breakdown_kcal?.sauce_extras);
+  const riceVal = data?.breakdown_kcal?.rice_carbs;
+  const meatVal = data?.breakdown_kcal?.meat_protein;
+  const sauceVal = data?.breakdown_kcal?.sauce_extras;
+  const rice = formatKcal(riceVal);
+  const meat = formatKcal(meatVal);
+  const sauce = formatKcal(sauceVal);
+  const hasBreakdown = [riceVal, meatVal, sauceVal].some((v) => typeof v === 'number' && Number.isFinite(v));
   const total = formatKcal(data?.calories);
+  const protein = typeof data?.protein_g === 'number' ? data.protein_g : Number(data?.protein_g);
+  const carbs = typeof data?.carbs_g === 'number' ? data.carbs_g : Number(data?.carbs_g);
+  const fats = typeof data?.fats_g === 'number' ? data.fats_g : Number(data?.fats_g);
+  const macros =
+    Number.isFinite(protein) && Number.isFinite(carbs) && Number.isFinite(fats)
+      ? `\n\n🥩 Protein: ${escapeMarkdown(protein.toFixed(0))}g   🍞 Carbs: ${escapeMarkdown(carbs.toFixed(0))}g   🥑 Fats: ${escapeMarkdown(fats.toFixed(0))}g`
+      : '';
+
+  const ingredients = Array.isArray(data?.ingredients) ? data.ingredients : [];
+  const ingredientsLines = ingredients
+    .slice(0, 8)
+    .map((i: any) => {
+      const name = escapeMarkdown(String(i?.name || 'Unknown'));
+      const grams = typeof i?.grams === 'number' ? `${Math.round(i.grams)}g` : '—g';
+      const kcal = typeof i?.calories === 'number' ? `${Math.round(i.calories)} kcal` : '— kcal';
+      return `• ${name}: ${escapeMarkdown(grams)} · ${escapeMarkdown(kcal)}`;
+    })
+    .join('\n');
+  const ingredientsBlock = ingredientsLines ? `\n\n🧾 Ingredients:\n${ingredientsLines}` : '';
   const questionRaw = typeof data?.clarification_question === 'string' ? data.clarification_question.trim() : '';
   const question = questionRaw ? `\n\n❓ ${escapeMarkdown(questionRaw)}` : '';
 
+  const breakdownBlock = hasBreakdown
+    ? `\n\n📊 Breakdown:\n` +
+      `• Rice/Carbs: ${escapeMarkdown(rice)} kcal\n` +
+      `• Meat/Protein: ${escapeMarkdown(meat)} kcal\n` +
+      `• Sauce/Extras: ${escapeMarkdown(sauce)} kcal`
+    : '';
+
   const text =
     `🍽️ Dish Identified: *${dish}*\n\n` +
-    `📊 Breakdown:\n` +
-    `• Rice/Carbs: ${escapeMarkdown(rice)} kcal\n` +
-    `• Meat/Protein: ${escapeMarkdown(meat)} kcal\n` +
-    `• Sauce/Extras: ${escapeMarkdown(sauce)} kcal\n\n` +
     `🔥 Total Calories: *${escapeMarkdown(total)}* kcal` +
+    macros +
+    breakdownBlock +
+    ingredientsBlock +
     question;
 
   return { text, parse_mode: 'MarkdownV2' };
@@ -554,14 +584,48 @@ bot.on(message('text'), async (ctx) => {
     const thinkingMsg = await ctx.reply('🔎 analysing...');
     try {
       const { data } = await nutritionService.processFoodText(userId, description);
-      const messageText = `📊 Nutrition (from text):
-🍽 Food: ${data.food_name}
-🔥 Calories: ${data.calories}
-🥩 Protein: ${data.protein_g}g
-🍞 Carbs: ${data.carbs_g}g
-🥑 Fats: ${data.fats_g}g`;
+      const { text: messageText } = buildFoodAnalysisMessage(data);
       await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
-      await ctx.reply(messageText, buildMainMenu());
+      await (ctx as any).replyWithMarkdownV2(messageText, buildMainMenu());
+    } catch (error) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
+      await ctx.reply(getUserFacingAnalysisError(error), buildMainMenu());
+    }
+    return;
+  }
+
+  if (flow.mode === 'fix_photo') {
+    const correction = text.slice(0, 400);
+    profileFlows.delete(userId);
+
+    const entry = nutritionService.getEntryForUser(userId, flow.entry_id);
+    if (!entry || !entry.telegram_file_id) {
+      await ctx.reply('❌ I cannot find that photo entry to fix. Please try again from History.', buildMainMenu());
+      return;
+    }
+
+    const thinkingMsg = await ctx.reply('🔎 analysing...');
+    try {
+      const fileLink = await bot.telegram.getFileLink(entry.telegram_file_id);
+      const response = await axios.get(fileLink.toString(), { responseType: 'arraybuffer' });
+      const buffer = Buffer.from(response.data, 'binary');
+      const base64 = buffer.toString('base64');
+      const mimeType = 'image/jpeg';
+
+      const updated = await nutritionService.reanalyzePhotoEntry(userId, flow.entry_id, base64, mimeType, correction);
+      if (!updated) {
+        await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
+        await ctx.reply('❌ Failed to update that entry. Please try again.', buildMainMenu());
+        return;
+      }
+
+      const { text: messageText } = buildFoodAnalysisMessage(updated.data);
+      await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
+      await (ctx as any).replyWithMarkdownV2(
+        messageText,
+        Markup.inlineKeyboard([[Markup.button.callback('Fix Results', `fix_entry_${flow.entry_id}`)]])
+      );
+      await ctx.reply('Updated ✅', buildMainMenu());
     } catch (error) {
       await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
       await ctx.reply(getUserFacingAnalysisError(error), buildMainMenu());
@@ -725,7 +789,7 @@ bot.on(message('photo'), async (ctx) => {
   }
 
   const fileLink = await bot.telegram.getFileLink(photo.file_id);
-  
+
   const thinkingMsg = await ctx.reply('🔎 analysing...');
 
   try {
@@ -734,12 +798,16 @@ bot.on(message('photo'), async (ctx) => {
     const base64 = buffer.toString('base64');
     const mimeType = 'image/jpeg'; // Telegram photos are usually jpeg
 
-    const { data } = await nutritionService.processFoodPhoto(userId, base64, mimeType, userDescription, photo.file_id);
+    const { data, entry_id } = await nutritionService.processFoodPhoto(userId, base64, mimeType, userDescription, photo.file_id);
 
     const { text: messageText } = buildFoodAnalysisMessage(data);
 
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
-    await (ctx as any).replyWithMarkdownV2(messageText, buildMainMenu());
+    await (ctx as any).replyWithMarkdownV2(
+      messageText,
+      Markup.inlineKeyboard([[Markup.button.callback('Fix Results', `fix_entry_${entry_id}`)]] )
+    );
+    await ctx.reply('Saved ✅', buildMainMenu());
   } catch (error) {
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
     const message = getErrorMessage(error);
@@ -751,6 +819,23 @@ bot.on(message('photo'), async (ctx) => {
     });
     await ctx.reply(getUserFacingAnalysisError(error), buildMainMenu());
   }
+});
+
+bot.action(/fix_entry_(\d+)/, async (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  await ctx.answerCbQuery();
+  const entryId = Number((ctx.callbackQuery as any)?.data?.match(/fix_entry_(\d+)/)?.[1]);
+  if (!Number.isFinite(entryId)) {
+    await ctx.reply('❌ Invalid entry ID.', buildMainMenu());
+    return;
+  }
+
+  profileFlows.set(userId, { mode: 'fix_photo', entry_id: entryId });
+  await ctx.reply(
+    '✍️ Tell me what looks wrong (ingredients or portion size).\nExample: "rice is half bowl, pork is 2 slices"',
+    buildMainMenu()
+  );
 });
 
 // /stats command

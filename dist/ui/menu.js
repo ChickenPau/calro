@@ -9,13 +9,14 @@ exports.MENU = {
     coach: '🧠 Coach',
     history: '📜 History',
     log: '✍️ Log meal',
+    export: '📄 Export',
     weekly: '📅 Weekly',
 };
 const buildMainMenu = () => {
     return telegraf_1.Markup.keyboard([
         [exports.MENU.start, exports.MENU.profile, exports.MENU.stats],
         [exports.MENU.coach, exports.MENU.history, exports.MENU.log],
-        [exports.MENU.weekly],
+        [exports.MENU.export, exports.MENU.weekly],
     ])
         .resize()
         .oneTime(false);

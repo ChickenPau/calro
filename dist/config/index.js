@@ -13,7 +13,9 @@ exports.config = {
     },
     gemini: {
         apiKey: process.env.GEMINI_API_KEY || '',
-        model: 'gemini-flash-latest',
+        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        textModel: process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
+        imageModel: process.env.GEMINI_IMAGE_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     },
     database: {
         path: path_1.default.resolve(process.cwd(), process.env.DATABASE_URL || 'database/calro.db'),

@@ -52,7 +52,7 @@ class UserRepository {
         daily_calorie_goal = excluded.daily_calorie_goal,
         updated_at = CURRENT_TIMESTAMP
     `);
-        stmt.run(profile.telegram_id, profile.display_name, profile.age_years, profile.sex, profile.weight_kg, profile.height_cm, profile.bmi, profile.bmi_status, profile.healthy_bmi_low, profile.healthy_bmi_high, profile.target_weight_low_kg, profile.target_weight_high_kg, profile.target_weight_high_kg, profile.daily_calorie_goal);
+        stmt.run(profile.telegram_id, profile.display_name, profile.age_years, profile.sex, profile.weight_kg, profile.height_cm, profile.bmi, profile.bmi_status, profile.healthy_bmi_low, profile.healthy_bmi_high, profile.target_weight_low_kg, profile.target_weight_high_kg, (profile.target_weight_low_kg + profile.target_weight_high_kg) / 2, profile.daily_calorie_goal);
     }
     clearProfile(telegram_id) {
         const stmt = this.db.prepare(`

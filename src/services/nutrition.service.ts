@@ -84,12 +84,20 @@ export class NutritionService {
     userRepository.deleteUser(telegram_id);
   }
 
-  public async processFoodPhoto(telegram_id: number, imageBase64: string, mimeType: string, userDescription?: string, telegram_file_id?: string): Promise<{ data: NutritionData; entry_date: string }> {
+  public async processFoodPhoto(
+    telegram_id: number,
+    imageBase64: string,
+    mimeType: string,
+    userDescription?: string,
+    telegram_file_id?: string
+  ): Promise<{ data: NutritionData; entry_date: string; entry_id: number }> {
     await this.registerUser(telegram_id);
     const { data, rawResponse } = await aiService.analyzeFoodImage(imageBase64, mimeType, userDescription);
     const entry_date = formatYmdInUtcOffset(new Date());
 
-    nutritionRepository.addEntry({
+    const ingredients_json = data.ingredients ? JSON.stringify(data.ingredients) : undefined;
+
+    const entry_id = nutritionRepository.addEntry({
       user_id: telegram_id,
       telegram_id,
       entry_date,
@@ -100,20 +108,23 @@ export class NutritionService {
       carbs_g: data.carbs_g,
       fats_g: data.fats_g,
       ai_tip: data.ai_tip,
+      ingredients_json,
       ai_raw_response: rawResponse,
     });
 
     nutritionRepository.pruneToLastMeals(telegram_id, 10);
 
-    return { data, entry_date };
+    return { data, entry_date, entry_id };
   }
 
-  public async processFoodText(telegram_id: number, description: string): Promise<{ data: NutritionData; entry_date: string }> {
+  public async processFoodText(telegram_id: number, description: string): Promise<{ data: NutritionData; entry_date: string; entry_id: number }> {
     await this.registerUser(telegram_id);
     const { data, rawResponse } = await aiService.analyzeFoodText(description);
     const entry_date = formatYmdInUtcOffset(new Date());
 
-    nutritionRepository.addEntry({
+    const ingredients_json = data.ingredients ? JSON.stringify(data.ingredients) : undefined;
+
+    const entry_id = nutritionRepository.addEntry({
       user_id: telegram_id,
       telegram_id,
       entry_date,
@@ -124,12 +135,42 @@ export class NutritionService {
       carbs_g: data.carbs_g,
       fats_g: data.fats_g,
       ai_tip: data.ai_tip,
+      ingredients_json,
       ai_raw_response: rawResponse,
     });
 
     nutritionRepository.pruneToLastMeals(telegram_id, 10);
 
-    return { data, entry_date };
+    return { data, entry_date, entry_id };
+  }
+
+  public async reanalyzePhotoEntry(
+    telegram_id: number,
+    entry_id: number,
+    imageBase64: string,
+    mimeType: string,
+    userCorrection: string
+  ): Promise<{ data: NutritionData; entry_date: string } | null> {
+    const existing = this.getEntryForUser(telegram_id, entry_id);
+    if (!existing || !existing.telegram_file_id) return null;
+
+    const combined = `${existing.food_name || ''}\nUser correction: ${userCorrection}`.trim();
+    const { data, rawResponse } = await aiService.analyzeFoodImage(imageBase64, mimeType, combined);
+    const ingredients_json = data.ingredients ? JSON.stringify(data.ingredients) : undefined;
+
+    const updated = nutritionRepository.updateEntryForUser(telegram_id, entry_id, {
+      food_name: data.food_name,
+      calories: data.calories,
+      protein_g: data.protein_g,
+      carbs_g: data.carbs_g,
+      fats_g: data.fats_g,
+      ai_tip: data.ai_tip,
+      ingredients_json,
+      ai_raw_response: rawResponse,
+    });
+
+    if (!updated) return null;
+    return { data, entry_date: updated.entry_date };
   }
 
   public async getDailyStats(telegram_id: number, date?: string) {

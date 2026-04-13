@@ -31,6 +31,8 @@ Snap a food photo, type what you ate, or ask the Coach anything about nutrition 
 - **Text logging** with Google Gemini (quick manual entries)
 - Safety checks like **rate limiting** and **image size validation**
 
+When you log a photo, Calro can also estimate a **per-ingredient breakdown** (rough grams + calories per ingredient), using reference objects in the image (spoon/chopsticks/plate size) to scale portions.
+
 ### Tracking
 - **Daily stats**: calories, macros, and a progress bar
 - **Weekly view**: a quick look at recent calorie totals
@@ -40,6 +42,8 @@ Snap a food photo, type what you ate, or ask the Coach anything about nutrition 
 - Each entry includes a **🗑 Delete** button
 - A **confirmation step** prevents accidental deletion
 - After deletion, your **daily totals recalculate immediately** and stay correct in the database
+
+If an estimate looks off, tap **Fix Results** on the analysis message and type what’s wrong (e.g., “rice is half bowl, pork is 2 slices”). Calro will re-analyze the same photo and update the saved entry.
 
 ### Coach mode (dual input)
 - A **suggestion panel** with quick question buttons
@@ -134,8 +138,8 @@ Railway can check `GET /health` to confirm the service is alive.
 - `GEMINI_API_KEY`
 
 Recommended (fast + cost-friendly routing):
-- `GEMINI_TEXT_MODEL` (example: `gemini-2.5-flash-lite`)
-- `GEMINI_IMAGE_MODEL` (example: `gemini-2.5-flash`)
+- `GEMINI_TEXT_MODEL` (example: `gemini-2.5-flash-lite`) — Coach chat + text meal logging
+- `GEMINI_IMAGE_MODEL` (example: `gemini-2.5-flash`) — Food photo analysis
 
 Optional:
 - `GEMINI_MODEL` (legacy single-model fallback)

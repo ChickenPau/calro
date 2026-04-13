@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.aiService = exports.AIService = void 0;
 const generative_ai_1 = require("@google/generative-ai");
-const p_retry_1 = __importDefault(require("p-retry"));
 const config_1 = require("@/config");
 const nutrition_1 = require("@/models/nutrition");
 const zod_1 = require("zod");
@@ -17,35 +16,176 @@ const logger = winston_1.default.createLogger({
         new winston_1.default.transports.Console(),
     ],
 });
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const toErrorMeta = (error) => {
+    const anyErr = error;
+    return {
+        name: anyErr?.name,
+        code: anyErr?.code,
+        status: anyErr?.status ?? anyErr?.response?.status,
+        message: anyErr?.message || String(error),
+    };
+};
+const normalizeModelName = (value) => {
+    let v = String(value || '').trim();
+    if (!v)
+        return v;
+    v = v.replace(/^models\//i, '');
+    const colonIndex = v.indexOf(':');
+    if (colonIndex >= 0)
+        v = v.slice(0, colonIndex);
+    v = v.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+    v = v.replace(/[_\s]+/g, '-').toLowerCase();
+    v = v.replace(/[^a-z0-9.\-]/g, '-');
+    v = v.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+    return v;
+};
+const retry = async (run, options) => {
+    const retries = Math.max(0, Math.floor(options.retries));
+    const minTimeoutMs = Math.max(0, Math.floor(options.minTimeoutMs ?? 250));
+    const factor = Math.max(1, options.factor ?? 2);
+    let attemptNumber = 1;
+    while (true) {
+        try {
+            return await run();
+        }
+        catch (error) {
+            const retriesLeft = retries - (attemptNumber - 1);
+            if (retriesLeft <= 0)
+                throw error;
+            options.onFailedAttempt?.({ attemptNumber, retriesLeft, error });
+            const backoffMs = Math.round(minTimeoutMs * Math.pow(factor, attemptNumber - 1));
+            await delay(backoffMs);
+            attemptNumber++;
+        }
+    }
+};
 class AIService {
     constructor() {
+        if (!config_1.config.gemini.apiKey) {
+            this.genAI = null;
+            this.textModel = null;
+            this.imageModel = null;
+            this.textModelName = null;
+            this.imageModelName = null;
+            return;
+        }
         this.genAI = new generative_ai_1.GoogleGenerativeAI(config_1.config.gemini.apiKey);
-        this.model = this.genAI.getGenerativeModel({ model: config_1.config.gemini.model });
+        this.textModelName = normalizeModelName(config_1.config.gemini.textModel);
+        this.imageModelName = normalizeModelName(config_1.config.gemini.imageModel);
+        this.textModel = this.genAI.getGenerativeModel({ model: this.textModelName });
+        this.imageModel = this.genAI.getGenerativeModel({ model: this.imageModelName });
+    }
+    ensureModels() {
+        if (!this.genAI || !this.textModel || !this.imageModel || !this.textModelName || !this.imageModelName) {
+            throw new Error('GEMINI_API_KEY is missing or invalid');
+        }
+        return {
+            genAI: this.genAI,
+            textModel: this.textModel,
+            imageModel: this.imageModel,
+            textModelName: this.textModelName,
+            imageModelName: this.imageModelName,
+        };
+    }
+    isModelNotSupportedError(error) {
+        const anyErr = error;
+        const status = anyErr?.status ?? anyErr?.response?.status;
+        const message = String(anyErr?.message || '').toLowerCase();
+        return (status === 404 ||
+            (status === 400 && message.includes('unexpected model name format')) ||
+            message.includes('not found') ||
+            message.includes('not supported for generatecontent'));
+    }
+    async generateContent(kind, input) {
+        const { genAI, textModel, imageModel, textModelName, imageModelName } = this.ensureModels();
+        const activeModel = kind === 'image' ? imageModel : textModel;
+        const activeModelName = kind === 'image' ? imageModelName : textModelName;
+        try {
+            return await activeModel.generateContent(input);
+        }
+        catch (error) {
+            const fallbackModel = 'gemini-1.5-flash';
+            if (this.isModelNotSupportedError(error) && activeModelName !== fallbackModel) {
+                logger.warn('Gemini model not supported; falling back', {
+                    kind,
+                    requestedModel: activeModelName,
+                    fallbackModel,
+                    error: toErrorMeta(error),
+                });
+                const nextModel = genAI.getGenerativeModel({ model: fallbackModel });
+                if (kind === 'image') {
+                    this.imageModelName = fallbackModel;
+                    this.imageModel = nextModel;
+                }
+                else {
+                    this.textModelName = fallbackModel;
+                    this.textModel = nextModel;
+                }
+                return await nextModel.generateContent(input);
+            }
+            throw error;
+        }
     }
     async analyzeFoodImage(imageBase64, mimeType, userDescription) {
-        const instruction = 'You are an expert sports nutritionist. Analyze the food image provided. Estimate the portion size and provide a macro breakdown: Total Calories, Protein (g), Carbohydrates (g), and Fats (g). Output the data in a clean format and include a short, encouraging coaching tip tailored to optimizing power-to-weight ratio and athletic performance.';
+        const instruction = 'You are a specialized Singaporean Nutritionist AI. Your task is to analyze images of food (primarily Singaporean hawker food, but also Western, Indian, Chinese, and other cuisines) and provide an accurate calorie estimate.';
+        const rules = `CRITICAL RULES:
+1) Identify the Dish: First identify if the dish is a standard hawker meal (e.g., Roasted Duck Rice, Char Siew Rice) or other cuisines.
+2) Reference Standards: Use Singapore Health Promotion Board (HPB) style baselines where possible (e.g., standard Duck Rice ~700 kcal) and adjust from there.
+3) Visual Scaling: Use the size of the spoon, chopsticks, bowl/plate rim to estimate portion size.
+4) Portion Sanity: If it looks like a standard single-person portion, DO NOT exceed 900 kcal unless it is clearly a massive sharing platter.
+5) If blurry/unclear: ask a short clarification question.`;
         const prompt = `${instruction}
-    ${userDescription ? `The user provided the following description: "${userDescription}". Use this information to improve your recognition of the food in the image.` : ''}
 
-    Please respond in the following JSON format ONLY:
+${rules}
+
+${userDescription ? `User description: "${userDescription}"` : ''}
+
+Think step-by-step privately. Do not include your internal reasoning in the output.
+
+Return JSON ONLY in this schema:
+{
+  "dish_identified": "string",
+  "food_name": "string",
+  "breakdown_kcal": {
+    "rice_carbs": number,
+    "meat_protein": number,
+    "sauce_extras": number
+  },
+  "ingredients": [
     {
-      "food_name": "string",
-      "calories": number,
-      "protein_g": number,
-      "carbs_g": number,
-      "fats_g": number,
-      "ai_tip": "string"
-    }`;
+      "name": "string",
+      "grams": number,
+      "calories": number
+    }
+  ],
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fats_g": number,
+  "ai_tip": "string",
+  "clarification_question": "string"
+}`;
         const runAnalysis = async () => {
-            const result = await this.model.generateContent([
-                prompt,
-                {
-                    inlineData: {
-                        data: imageBase64,
-                        mimeType,
+            const result = await this.generateContent('image', {
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            { text: prompt },
+                            {
+                                inlineData: {
+                                    data: imageBase64,
+                                    mimeType,
+                                },
+                            },
+                        ],
                     },
+                ],
+                generationConfig: {
+                    responseMimeType: 'application/json',
                 },
-            ]);
+            });
             const response = await result.response;
             const text = response.text();
             try {
@@ -55,6 +195,35 @@ class AIService {
                     throw new Error('No valid JSON found in AI response');
                 }
                 const jsonData = JSON.parse(jsonMatch[0]);
+                if (jsonData && typeof jsonData === 'object') {
+                    if (jsonData.clarification_question === null)
+                        delete jsonData.clarification_question;
+                    if (jsonData.dish_identified === null)
+                        delete jsonData.dish_identified;
+                    if (jsonData.breakdown_kcal === null)
+                        delete jsonData.breakdown_kcal;
+                    if (jsonData.ingredients === null)
+                        delete jsonData.ingredients;
+                    if (jsonData.breakdown_kcal && typeof jsonData.breakdown_kcal === 'object') {
+                        if (jsonData.breakdown_kcal.rice_carbs === null)
+                            delete jsonData.breakdown_kcal.rice_carbs;
+                        if (jsonData.breakdown_kcal.meat_protein === null)
+                            delete jsonData.breakdown_kcal.meat_protein;
+                        if (jsonData.breakdown_kcal.sauce_extras === null)
+                            delete jsonData.breakdown_kcal.sauce_extras;
+                    }
+                    if (Array.isArray(jsonData.ingredients)) {
+                        jsonData.ingredients = jsonData.ingredients
+                            .filter((i) => i && typeof i === 'object')
+                            .map((i) => {
+                            if (i.grams === null)
+                                delete i.grams;
+                            if (i.calories === null)
+                                delete i.calories;
+                            return i;
+                        });
+                    }
+                }
                 if (typeof jsonData.food_name !== 'string' || jsonData.food_name.trim().length === 0) {
                     jsonData.food_name = userDescription && userDescription.trim().length > 0 ? userDescription.trim().slice(0, 80) : 'Unknown';
                 }
@@ -66,10 +235,10 @@ class AIService {
                 throw new Error('Invalid AI response format');
             }
         };
-        return (0, p_retry_1.default)(runAnalysis, {
+        return retry(runAnalysis, {
             retries: 3,
-            onFailedAttempt: (error) => {
-                logger.warn(`AI Analysis attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+            onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+                logger.warn(`AI Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
             },
         });
     }
@@ -87,10 +256,22 @@ Please respond in the following JSON format ONLY:
   "protein_g": number,
   "carbs_g": number,
   "fats_g": number,
+  "ingredients": [
+    {
+      "name": "string",
+      "grams": number,
+      "calories": number
+    }
+  ],
   "ai_tip": "string"
 }`;
         const runAnalysis = async () => {
-            const result = await this.model.generateContent(prompt);
+            const result = await this.generateContent('text', {
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: 'application/json',
+                },
+            });
             const text = result.response.text();
             try {
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -98,6 +279,21 @@ Please respond in the following JSON format ONLY:
                     throw new Error('No valid JSON found in AI response');
                 }
                 const jsonData = JSON.parse(jsonMatch[0]);
+                if (jsonData && typeof jsonData === 'object') {
+                    if (jsonData.ingredients === null)
+                        delete jsonData.ingredients;
+                    if (Array.isArray(jsonData.ingredients)) {
+                        jsonData.ingredients = jsonData.ingredients
+                            .filter((i) => i && typeof i === 'object')
+                            .map((i) => {
+                            if (i.grams === null)
+                                delete i.grams;
+                            if (i.calories === null)
+                                delete i.calories;
+                            return i;
+                        });
+                    }
+                }
                 if (typeof jsonData.food_name !== 'string' || jsonData.food_name.trim().length === 0) {
                     jsonData.food_name = description.trim().slice(0, 80);
                 }
@@ -109,10 +305,10 @@ Please respond in the following JSON format ONLY:
                 throw new Error('Invalid AI response format');
             }
         };
-        return (0, p_retry_1.default)(runAnalysis, {
+        return retry(runAnalysis, {
             retries: 3,
-            onFailedAttempt: (error) => {
-                logger.warn(`AI Text Analysis attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+            onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+                logger.warn(`AI Text Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
             },
         });
     }
@@ -136,7 +332,7 @@ Return JSON ONLY:
   "target_weight_kg": number
 }`;
         const run = async () => {
-            const result = await this.model.generateContent(prompt);
+            const result = await this.generateContent('text', prompt);
             const text = result.response.text();
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             if (!jsonMatch)
@@ -149,10 +345,10 @@ Return JSON ONLY:
                 target_weight_kg: Number(validated.target_weight_kg),
             };
         };
-        return (0, p_retry_1.default)(run, {
+        return retry(run, {
             retries: 2,
-            onFailedAttempt: (error) => {
-                logger.warn(`BMI attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+            onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+                logger.warn(`BMI attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
             },
         });
     }
@@ -181,7 +377,7 @@ Return JSON ONLY:
   "rationale": "short rationale"
 }`;
         const run = async () => {
-            const result = await this.model.generateContent(prompt);
+            const result = await this.generateContent('text', prompt);
             const text = result.response.text();
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             if (!jsonMatch)
@@ -194,10 +390,10 @@ Return JSON ONLY:
                 rationale: validated.rationale,
             };
         };
-        return (0, p_retry_1.default)(run, {
+        return retry(run, {
             retries: 2,
-            onFailedAttempt: (error) => {
-                logger.warn(`BMI range attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+            onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+                logger.warn(`BMI range attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
             },
         });
     }
@@ -225,7 +421,7 @@ Return JSON ONLY:
   "rationale": "short explanation"
 }`;
         const run = async () => {
-            const result = await this.model.generateContent(prompt);
+            const result = await this.generateContent('text', prompt);
             const text = result.response.text();
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             if (!jsonMatch)
@@ -237,10 +433,10 @@ Return JSON ONLY:
                 rationale: validated.rationale,
             };
         };
-        return (0, p_retry_1.default)(run, {
+        return retry(run, {
             retries: 2,
-            onFailedAttempt: (error) => {
-                logger.warn(`Calorie goal attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`, { error: error.message });
+            onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+                logger.warn(`Calorie goal attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
             },
         });
     }
@@ -261,7 +457,7 @@ Recent meals:
 ${input.recentFoods.map((m) => `- ${m.when}: ${m.food_name} (${m.calories} kcal)`).join('\n')}
 
 Give practical advice for the rest of today. Include hydration reminder, healthy fats examples, and a simple next-meal suggestion. Keep it under 8 lines.`;
-        const result = await this.model.generateContent(prompt);
+        const result = await this.generateContent('text', prompt);
         return result.response.text().trim();
     }
     async coachChat(input) {
@@ -294,18 +490,44 @@ Return JSON ONLY:
   "more": "string (<=2500 chars)",
   "memory": "updated compact memory (<=800 chars)"
 }`;
-        const result = await this.model.generateContent(prompt);
+        const result = await this.generateContent('text', {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                responseMimeType: 'application/json',
+            },
+        });
         const text = result.response.text();
         const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch)
-            throw new Error('No valid JSON found in coach response');
-        const jsonData = JSON.parse(jsonMatch[0]);
-        const validated = schema.parse(jsonData);
-        return {
-            reply: validated.reply.slice(0, 900),
-            more: validated.more.slice(0, 2500),
-            memory: validated.memory.slice(0, 800),
-        };
+        if (!jsonMatch) {
+            logger.warn('Coach response was not valid JSON; using plain-text fallback', {
+                preview: text.slice(0, 600),
+            });
+            return {
+                reply: text.trim().slice(0, 900) || 'Sorry — I could not generate a valid response. Please try again.',
+                more: '',
+                memory: (input.memory || '').slice(0, 800),
+            };
+        }
+        try {
+            const jsonData = JSON.parse(jsonMatch[0]);
+            const validated = schema.parse(jsonData);
+            return {
+                reply: validated.reply.slice(0, 900),
+                more: validated.more.slice(0, 2500),
+                memory: validated.memory.slice(0, 800),
+            };
+        }
+        catch (error) {
+            logger.warn('Coach JSON parse/validation failed; using plain-text fallback', {
+                error: toErrorMeta(error),
+                preview: text.slice(0, 600),
+            });
+            return {
+                reply: text.trim().slice(0, 900) || 'Sorry — I could not generate a valid response. Please try again.',
+                more: '',
+                memory: (input.memory || '').slice(0, 800),
+            };
+        }
     }
 }
 exports.AIService = AIService;

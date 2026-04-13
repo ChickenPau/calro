@@ -15,6 +15,7 @@ const chunkText = (text, chunkSize) => {
 };
 class CoachService {
     async ask(telegram_id, userMessage) {
+        await nutrition_service_1.nutritionService.registerUser(telegram_id);
         const state = coach_repository_1.coachRepository.getState(telegram_id);
         const profile = nutrition_service_1.nutritionService.getProfile(telegram_id) || undefined;
         const result = await ai_service_1.aiService.coachChat({
