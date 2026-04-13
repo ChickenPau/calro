@@ -104,6 +104,50 @@ export class NutritionRepository {
     }
   }
 
+  public trimPhotoReferencesToLast(telegram_id: number, keep: number = 10): void {
+    if (keep <= 0) return;
+
+    const keepIds = this.db
+      .prepare(
+        `
+          SELECT id
+          FROM nutrition_entries
+          WHERE user_id = ? AND is_deleted = 0 AND telegram_file_id IS NOT NULL AND telegram_file_id != ''
+          ORDER BY datetime(created_at) DESC, id DESC
+          LIMIT ?
+        `
+      )
+      .all(telegram_id, keep) as Array<{ id: number }>;
+
+    const ids = keepIds.map((r) => r.id);
+    if (ids.length === 0) {
+      this.db
+        .prepare(
+          `
+            UPDATE nutrition_entries
+            SET telegram_file_id = NULL, image_url = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND is_deleted = 0 AND telegram_file_id IS NOT NULL AND telegram_file_id != ''
+          `
+        )
+        .run(telegram_id);
+      return;
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    this.db
+      .prepare(
+        `
+          UPDATE nutrition_entries
+          SET telegram_file_id = NULL, image_url = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ?
+            AND is_deleted = 0
+            AND telegram_file_id IS NOT NULL AND telegram_file_id != ''
+            AND id NOT IN (${placeholders})
+        `
+      )
+      .run(telegram_id, ...ids);
+  }
+
   public recomputeDailySummary(telegram_id: number, date: string): void {
     const totals = this.db
       .prepare(

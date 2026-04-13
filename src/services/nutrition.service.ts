@@ -112,7 +112,7 @@ export class NutritionService {
       ai_raw_response: rawResponse,
     });
 
-    nutritionRepository.pruneToLastMeals(telegram_id, 10);
+    nutritionRepository.trimPhotoReferencesToLast(telegram_id, 10);
 
     return { data, entry_date, entry_id };
   }
@@ -138,8 +138,6 @@ export class NutritionService {
       ingredients_json,
       ai_raw_response: rawResponse,
     });
-
-    nutritionRepository.pruneToLastMeals(telegram_id, 10);
 
     return { data, entry_date, entry_id };
   }

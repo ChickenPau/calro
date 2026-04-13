@@ -90,7 +90,7 @@ class NutritionService {
             ingredients_json,
             ai_raw_response: rawResponse,
         });
-        nutrition_repository_1.nutritionRepository.pruneToLastMeals(telegram_id, 10);
+        nutrition_repository_1.nutritionRepository.trimPhotoReferencesToLast(telegram_id, 10);
         return { data, entry_date, entry_id };
     }
     async processFoodText(telegram_id, description) {
@@ -112,7 +112,6 @@ class NutritionService {
             ingredients_json,
             ai_raw_response: rawResponse,
         });
-        nutrition_repository_1.nutritionRepository.pruneToLastMeals(telegram_id, 10);
         return { data, entry_date, entry_id };
     }
     async reanalyzePhotoEntry(telegram_id, entry_id, imageBase64, mimeType, userCorrection) {
