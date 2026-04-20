@@ -156,6 +156,8 @@ const buildFoodAnalysisMessage = (data: any): { text: string; parse_mode: 'Markd
     })
     .join('\n');
   const ingredientsBlock = ingredientsLines ? `\n\n🧾 Ingredients:\n${ingredientsLines}` : '';
+  const tipRaw = typeof data?.ai_tip === 'string' ? data.ai_tip.trim() : '';
+  const tip = tipRaw ? `\n\n💡 Tip: ${escapeMarkdown(tipRaw)}` : '';
   const questionRaw = typeof data?.clarification_question === 'string' ? data.clarification_question.trim() : '';
   const question = questionRaw ? `\n\n❓ ${escapeMarkdown(questionRaw)}` : '';
 
@@ -172,6 +174,7 @@ const buildFoodAnalysisMessage = (data: any): { text: string; parse_mode: 'Markd
     macros +
     breakdownBlock +
     ingredientsBlock +
+    tip +
     question;
 
   return { text, parse_mode: 'MarkdownV2' };

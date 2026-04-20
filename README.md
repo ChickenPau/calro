@@ -45,6 +45,8 @@ When you log a photo, Calro can also estimate a **per-ingredient breakdown** (ro
 
 If an estimate looks off, tap **Fix Results** on the analysis message and type what’s wrong (e.g., “rice is half bowl, pork is 2 slices”). Calro will re-analyze the same photo and update the saved entry.
 
+To keep storage small, the bot only keeps photo references for your **latest 10 photo logs** (older meal analysis stays saved, but may no longer include the photo for re-analysis).
+
 ### Coach mode (dual input)
 - A **suggestion panel** with quick question buttons
 - You can also **type freely anytime**
