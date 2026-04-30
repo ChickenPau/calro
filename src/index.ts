@@ -9,7 +9,7 @@ import winston from 'winston';
 import axios from 'axios';
 import { buildMainMenu, MENU } from './ui/menu';
 import express from 'express';
-import { formatYmdHmInUtcOffsetFromSqlite } from './utils/time';
+import { formatYmdHmInUtcOffsetFromSqlite, formatYmdInUtcOffset } from './utils/time';
 
 const logger = winston.createLogger({
   level: config.logger.level,
@@ -206,24 +206,13 @@ const getUserFacingAnalysisError = (error: unknown): string => {
   return '❌ Failed to analyze the image. Please try again with a clearer food photo.';
 };
 
-// Simple in-memory rate limiting
-const rateLimits = new Map<number, { count: number; lastReset: number }>();
-const RATE_LIMIT_WINDOW = 3600000; // 1 hour
-const MAX_PHOTOS_PER_WINDOW = 5;
+// Daily photo limit (DB-backed, resets each calendar day)
+const MAX_PHOTOS_PER_DAY = 10;
 
-const checkRateLimit = (userId: number): boolean => {
-  const now = Date.now();
-  const limit = rateLimits.get(userId) || { count: 0, lastReset: now };
-
-  if (now - limit.lastReset > RATE_LIMIT_WINDOW) {
-    limit.count = 1;
-    limit.lastReset = now;
-  } else {
-    limit.count++;
-  }
-
-  rateLimits.set(userId, limit);
-  return limit.count <= MAX_PHOTOS_PER_WINDOW;
+const checkDailyPhotoLimit = (telegramId: number): boolean => {
+  const today = formatYmdInUtcOffset(new Date());
+  const count = nutritionRepository.getPhotoCountToday(telegramId, today);
+  return count < MAX_PHOTOS_PER_DAY;
 };
 
 // Middleware for logging and error handling
@@ -779,8 +768,8 @@ bot.action(/sex_(Male|Female)/, async (ctx) => {
 bot.on(message('photo'), async (ctx) => {
   const userId = ctx.from.id;
 
-  if (!checkRateLimit(userId)) {
-    return ctx.reply('⚠️ Rate limit exceeded. Please wait an hour before sending more photos (max 5 per hour).');
+  if (!checkDailyPhotoLimit(userId)) {
+    return ctx.reply("⚠️ You've reached your daily limit of 10 photo logs. Try again tomorrow!");
   }
 
   const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
