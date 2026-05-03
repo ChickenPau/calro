@@ -5,6 +5,7 @@ import { config } from './config';
 import { nutritionService } from './services/nutrition.service';
 import { coachService } from './services/coach.service';
 import { userRepository } from './repositories/user.repository';
+import { nutritionRepository } from './repositories/nutrition.repository';
 import winston from 'winston';
 import axios from 'axios';
 import { buildMainMenu, MENU } from './ui/menu';
