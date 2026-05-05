@@ -207,13 +207,19 @@ const getUserFacingAnalysisError = (error: unknown): string => {
   return '❌ Failed to analyze the image. Please try again with a clearer food photo.';
 };
 
-// Daily photo limit (DB-backed, resets each calendar day)
-const MAX_PHOTOS_PER_DAY = 10;
+// Daily prompt limit covers both photo and text meal logs (DB-backed, resets each calendar day)
+const MAX_PROMPTS_PER_DAY = 10;
 
-const checkDailyPhotoLimit = (telegramId: number): boolean => {
+const checkDailyPromptLimit = (telegramId: number): boolean => {
   const today = formatYmdInUtcOffset(new Date());
-  const count = nutritionRepository.getPhotoCountToday(telegramId, today);
-  return count < MAX_PHOTOS_PER_DAY;
+  const count = nutritionRepository.getPromptCountToday(telegramId, today);
+  return count < MAX_PROMPTS_PER_DAY;
+};
+
+const getPromptsRemaining = (telegramId: number): number => {
+  const today = formatYmdInUtcOffset(new Date());
+  const count = nutritionRepository.getPromptCountToday(telegramId, today);
+  return Math.max(0, MAX_PROMPTS_PER_DAY - count);
 };
 
 // Middleware for logging and error handling
@@ -572,6 +578,10 @@ bot.on(message('text'), async (ctx) => {
   }
 
   if (flow.mode === 'text_meal') {
+    if (!checkDailyPromptLimit(userId)) {
+      profileFlows.delete(userId);
+      return ctx.reply("⚠️ You've reached your daily limit of 10 prompts. Try again tomorrow!", buildMainMenu());
+    }
     const description = text.slice(0, 500);
     profileFlows.delete(userId);
     const thinkingMsg = await ctx.reply('🔎 analysing...');
@@ -580,6 +590,8 @@ bot.on(message('text'), async (ctx) => {
       const { text: messageText } = buildFoodAnalysisMessage(data);
       await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
       await (ctx as any).replyWithMarkdownV2(messageText, buildMainMenu());
+      const remaining = getPromptsRemaining(userId);
+      await ctx.reply(`📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today.`);
     } catch (error) {
       await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
       await ctx.reply(getUserFacingAnalysisError(error), buildMainMenu());
@@ -769,8 +781,8 @@ bot.action(/sex_(Male|Female)/, async (ctx) => {
 bot.on(message('photo'), async (ctx) => {
   const userId = ctx.from.id;
 
-  if (!checkDailyPhotoLimit(userId)) {
-    return ctx.reply("⚠️ You've reached your daily limit of 10 photo logs. Try again tomorrow!");
+  if (!checkDailyPromptLimit(userId)) {
+    return ctx.reply("⚠️ You've reached your daily limit of 10 prompts. Try again tomorrow!");
   }
 
   const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
@@ -801,6 +813,8 @@ bot.on(message('photo'), async (ctx) => {
       Markup.inlineKeyboard([[Markup.button.callback('Fix Results', `fix_entry_${entry_id}`)]] )
     );
     await ctx.reply('Saved ✅', buildMainMenu());
+    const remaining = getPromptsRemaining(userId);
+    await ctx.reply(`📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today.`);
   } catch (error) {
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
     const message = getErrorMessage(error);

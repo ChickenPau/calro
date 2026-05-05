@@ -213,6 +213,17 @@ export class NutritionRepository {
     return row?.count ?? 0;
   }
 
+  public getPromptCountToday(telegramId: number, date: string): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM nutrition_entries
+      WHERE telegram_id = ?
+        AND entry_date = ?
+        AND is_deleted = 0
+    `).get(telegramId, date) as { count: number };
+    return row?.count ?? 0;
+  }
+
   public getDailySummary(telegram_id: number, date: string): DailySummary | undefined {
     const stmt = this.db.prepare(`
       SELECT * FROM daily_summaries 
