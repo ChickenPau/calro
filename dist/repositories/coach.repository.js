@@ -40,6 +40,17 @@ class CoachRepository {
     clearState(telegram_id) {
         this.db.prepare('DELETE FROM coach_state WHERE telegram_id = ?').run(telegram_id);
     }
+    recordCoachInput(telegram_id, date) {
+        this.db
+            .prepare(`INSERT INTO coach_inputs (telegram_id, entry_date) VALUES (?, ?)`)
+            .run(telegram_id, date);
+    }
+    getCoachInputCountToday(telegram_id, date) {
+        const row = this.db
+            .prepare(`SELECT COUNT(*) as count FROM coach_inputs WHERE telegram_id = ? AND entry_date = ?`)
+            .get(telegram_id, date);
+        return row?.count ?? 0;
+    }
 }
 exports.CoachRepository = CoachRepository;
 exports.coachRepository = new CoachRepository();

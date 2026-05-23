@@ -52,6 +52,19 @@ export class CoachRepository {
   public clearState(telegram_id: number): void {
     this.db.prepare('DELETE FROM coach_state WHERE telegram_id = ?').run(telegram_id);
   }
+
+  public recordCoachInput(telegram_id: number, date: string): void {
+    this.db
+      .prepare(`INSERT INTO coach_inputs (telegram_id, entry_date) VALUES (?, ?)`)
+      .run(telegram_id, date);
+  }
+
+  public getCoachInputCountToday(telegram_id: number, date: string): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) as count FROM coach_inputs WHERE telegram_id = ? AND entry_date = ?`)
+      .get(telegram_id, date) as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
 }
 
 export const coachRepository = new CoachRepository();

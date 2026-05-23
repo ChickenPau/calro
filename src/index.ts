@@ -6,6 +6,7 @@ import { nutritionService } from './services/nutrition.service';
 import { coachService } from './services/coach.service';
 import { userRepository } from './repositories/user.repository';
 import { nutritionRepository } from './repositories/nutrition.repository';
+import { coachRepository } from './repositories/coach.repository';
 import winston from 'winston';
 import axios from 'axios';
 import { buildMainMenu, MENU } from './ui/menu';
@@ -207,19 +208,23 @@ const getUserFacingAnalysisError = (error: unknown): string => {
   return '❌ Failed to analyze the image. Please try again with a clearer food photo.';
 };
 
-// Daily prompt limit covers both photo and text meal logs (DB-backed, resets each calendar day)
+// Daily prompt limit covers photo logs, text meal logs, and Coach messages
+// (DB-backed, resets each calendar day in Singapore time / UTC+8)
 const MAX_PROMPTS_PER_DAY = 10;
 
-const checkDailyPromptLimit = (telegramId: number): boolean => {
+const getPromptCountToday = (telegramId: number): number => {
   const today = formatYmdInUtcOffset(new Date());
-  const count = nutritionRepository.getPromptCountToday(telegramId, today);
-  return count < MAX_PROMPTS_PER_DAY;
+  const meals = nutritionRepository.getPromptCountToday(telegramId, today);
+  const coach = coachRepository.getCoachInputCountToday(telegramId, today);
+  return meals + coach;
+};
+
+const checkDailyPromptLimit = (telegramId: number): boolean => {
+  return getPromptCountToday(telegramId) < MAX_PROMPTS_PER_DAY;
 };
 
 const getPromptsRemaining = (telegramId: number): number => {
-  const today = formatYmdInUtcOffset(new Date());
-  const count = nutritionRepository.getPromptCountToday(telegramId, today);
-  return Math.max(0, MAX_PROMPTS_PER_DAY - count);
+  return Math.max(0, MAX_PROMPTS_PER_DAY - getPromptCountToday(telegramId));
 };
 
 // Middleware for logging and error handling
@@ -428,15 +433,24 @@ bot.hears(MENU.coach, coachEnterHandler);
 
 const runCoachAsk = async (ctx: any, userMessage: string) => {
   const userId = ctx.from.id;
+  if (!checkDailyPromptLimit(userId)) {
+    return ctx.reply(
+      "⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!",
+      buildMainMenu()
+    );
+  }
+  coachRepository.recordCoachInput(userId, formatYmdInUtcOffset(new Date()));
   const thinkingMsg = await ctx.reply('🔎 analysing...');
   try {
     const { reply, hasMore } = await coachService.ask(userId, userMessage);
     const buttons: any[] = [];
     if (hasMore) buttons.push([Markup.button.callback('Tell me more', 'coach_more')]);
     buttons.push([Markup.button.callback('Back to menu', 'coach_exit')]);
-    
+
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
     await ctx.reply(reply, Markup.inlineKeyboard(buttons));
+    const remaining = getPromptsRemaining(userId);
+    await ctx.reply(`📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today.`);
   } catch (error) {
     await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => {});
     logger.error('Coach chat failed', { userId, message: getErrorMessage(error) });
@@ -580,7 +594,7 @@ bot.on(message('text'), async (ctx) => {
   if (flow.mode === 'text_meal') {
     if (!checkDailyPromptLimit(userId)) {
       profileFlows.delete(userId);
-      return ctx.reply("⚠️ You've reached your daily limit of 10 prompts. Try again tomorrow!", buildMainMenu());
+      return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", buildMainMenu());
     }
     const description = text.slice(0, 500);
     profileFlows.delete(userId);
@@ -782,7 +796,7 @@ bot.on(message('photo'), async (ctx) => {
   const userId = ctx.from.id;
 
   if (!checkDailyPromptLimit(userId)) {
-    return ctx.reply("⚠️ You've reached your daily limit of 10 prompts. Try again tomorrow!");
+    return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!");
   }
 
   const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
