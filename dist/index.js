@@ -119,7 +119,7 @@ const buildFoodAnalysisMessage = (data) => {
     const carbs = typeof data?.carbs_g === 'number' ? data.carbs_g : Number(data?.carbs_g);
     const fats = typeof data?.fats_g === 'number' ? data.fats_g : Number(data?.fats_g);
     const macros = Number.isFinite(protein) && Number.isFinite(carbs) && Number.isFinite(fats)
-        ? `\n\n🥩 Protein: ${escapeMarkdown(protein.toFixed(0))}g   🍞 Carbs: ${escapeMarkdown(carbs.toFixed(0))}g   🥑 Fats: ${escapeMarkdown(fats.toFixed(0))}g`
+        ? `\n\n🥩 Protein: ${escapeMarkdown(protein.toFixed(0))}g\n🍞 Carbs: ${escapeMarkdown(carbs.toFixed(0))}g\n🥑 Fats: ${escapeMarkdown(fats.toFixed(0))}g`
         : '';
     const ingredients = Array.isArray(data?.ingredients) ? data.ingredients : [];
     const ingredientsLines = ingredients
