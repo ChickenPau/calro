@@ -173,7 +173,7 @@ const getUserFacingAnalysisError = (error) => {
 };
 // Daily prompt limit covers photo logs, text meal logs, and Coach messages
 // (DB-backed, resets each calendar day in Singapore time / UTC+8)
-const MAX_PROMPTS_PER_DAY = 10;
+const MAX_PROMPTS_PER_DAY = 5;
 const getPromptCountToday = (telegramId) => {
     const today = (0, time_1.formatYmdInUtcOffset)(new Date());
     const meals = nutrition_repository_1.nutritionRepository.getPromptCountToday(telegramId, today);
@@ -352,7 +352,7 @@ bot.hears(menu_1.MENU.coach, coachEnterHandler);
 const runCoachAsk = async (ctx, userMessage) => {
     const userId = ctx.from.id;
     if (!checkDailyPromptLimit(userId)) {
-        return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", (0, menu_1.buildMainMenu)());
+        return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", (0, menu_1.buildMainMenu)());
     }
     coach_repository_1.coachRepository.recordCoachInput(userId, (0, time_1.formatYmdInUtcOffset)(new Date()));
     const thinkingMsg = await ctx.reply('🔎 analysing...');
@@ -496,7 +496,7 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
     if (flow.mode === 'text_meal') {
         if (!checkDailyPromptLimit(userId)) {
             profileFlows.delete(userId);
-            return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", (0, menu_1.buildMainMenu)());
+            return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", (0, menu_1.buildMainMenu)());
         }
         const description = text.slice(0, 500);
         profileFlows.delete(userId);
@@ -671,7 +671,7 @@ bot.action(/sex_(Male|Female)/, async (ctx) => {
 bot.on((0, filters_1.message)('photo'), async (ctx) => {
     const userId = ctx.from.id;
     if (!checkDailyPromptLimit(userId)) {
-        return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!");
+        return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!");
     }
     const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
     const userDescription = ctx.message.caption; // Use photo caption as description

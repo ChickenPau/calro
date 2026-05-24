@@ -210,7 +210,7 @@ const getUserFacingAnalysisError = (error: unknown): string => {
 
 // Daily prompt limit covers photo logs, text meal logs, and Coach messages
 // (DB-backed, resets each calendar day in Singapore time / UTC+8)
-const MAX_PROMPTS_PER_DAY = 10;
+const MAX_PROMPTS_PER_DAY = 5;
 
 const getPromptCountToday = (telegramId: number): number => {
   const today = formatYmdInUtcOffset(new Date());
@@ -438,7 +438,7 @@ const runCoachAsk = async (ctx: any, userMessage: string) => {
   const userId = ctx.from.id;
   if (!checkDailyPromptLimit(userId)) {
     return ctx.reply(
-      "⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!",
+      "⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!",
       buildMainMenu()
     );
   }
@@ -597,7 +597,7 @@ bot.on(message('text'), async (ctx) => {
   if (flow.mode === 'text_meal') {
     if (!checkDailyPromptLimit(userId)) {
       profileFlows.delete(userId);
-      return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", buildMainMenu());
+      return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", buildMainMenu());
     }
     const description = text.slice(0, 500);
     profileFlows.delete(userId);
@@ -799,7 +799,7 @@ bot.on(message('photo'), async (ctx) => {
   const userId = ctx.from.id;
 
   if (!checkDailyPromptLimit(userId)) {
-    return ctx.reply("⚠️ You've reached your daily limit of 10 prompts (shared across photos, text meals, and Coach). Try again tomorrow!");
+    return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!");
   }
 
   const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
