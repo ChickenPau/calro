@@ -89,6 +89,15 @@ class DatabaseRepository {
       )
     `);
         this.db.exec(`
+      CREATE TABLE IF NOT EXISTS coach_inputs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        entry_date DATE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_coach_inputs_user_date ON coach_inputs(telegram_id, entry_date)`);
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS daily_calorie_goals (
         user_id INTEGER NOT NULL,
         goal_date DATE NOT NULL,

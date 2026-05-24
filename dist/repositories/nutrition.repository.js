@@ -127,6 +127,27 @@ class NutritionRepository {
         `)
             .run(telegram_id, date, totals.total_calories, totals.total_protein_g, totals.total_carbs_g, totals.total_fats_g, totals.entry_count, created_at);
     }
+    getPhotoCountToday(telegramId, date) {
+        const row = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM nutrition_entries
+      WHERE telegram_id = ?
+        AND entry_date = ?
+        AND telegram_file_id IS NOT NULL
+        AND is_deleted = 0
+    `).get(telegramId, date);
+        return row?.count ?? 0;
+    }
+    getPromptCountToday(telegramId, date) {
+        const row = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM nutrition_entries
+      WHERE telegram_id = ?
+        AND entry_date = ?
+        AND is_deleted = 0
+    `).get(telegramId, date);
+        return row?.count ?? 0;
+    }
     getDailySummary(telegram_id, date) {
         const stmt = this.db.prepare(`
       SELECT * FROM daily_summaries 

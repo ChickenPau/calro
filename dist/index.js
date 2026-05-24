@@ -10,6 +10,8 @@ const config_1 = require("./config");
 const nutrition_service_1 = require("./services/nutrition.service");
 const coach_service_1 = require("./services/coach.service");
 const user_repository_1 = require("./repositories/user.repository");
+const nutrition_repository_1 = require("./repositories/nutrition.repository");
+const coach_repository_1 = require("./repositories/coach.repository");
 const winston_1 = __importDefault(require("winston"));
 const axios_1 = __importDefault(require("axios"));
 const menu_1 = require("./ui/menu");
@@ -117,7 +119,7 @@ const buildFoodAnalysisMessage = (data) => {
     const carbs = typeof data?.carbs_g === 'number' ? data.carbs_g : Number(data?.carbs_g);
     const fats = typeof data?.fats_g === 'number' ? data.fats_g : Number(data?.fats_g);
     const macros = Number.isFinite(protein) && Number.isFinite(carbs) && Number.isFinite(fats)
-        ? `\n\n🥩 Protein: ${escapeMarkdown(protein.toFixed(0))}g   🍞 Carbs: ${escapeMarkdown(carbs.toFixed(0))}g   🥑 Fats: ${escapeMarkdown(fats.toFixed(0))}g`
+        ? `\n\n🥩 Protein: ${escapeMarkdown(protein.toFixed(0))}g\n🍞 Carbs: ${escapeMarkdown(carbs.toFixed(0))}g\n🥑 Fats: ${escapeMarkdown(fats.toFixed(0))}g`
         : '';
     const ingredients = Array.isArray(data?.ingredients) ? data.ingredients : [];
     const ingredientsLines = ingredients
@@ -169,22 +171,20 @@ const getUserFacingAnalysisError = (error) => {
     }
     return '❌ Failed to analyze the image. Please try again with a clearer food photo.';
 };
-// Simple in-memory rate limiting
-const rateLimits = new Map();
-const RATE_LIMIT_WINDOW = 3600000; // 1 hour
-const MAX_PHOTOS_PER_WINDOW = 5;
-const checkRateLimit = (userId) => {
-    const now = Date.now();
-    const limit = rateLimits.get(userId) || { count: 0, lastReset: now };
-    if (now - limit.lastReset > RATE_LIMIT_WINDOW) {
-        limit.count = 1;
-        limit.lastReset = now;
-    }
-    else {
-        limit.count++;
-    }
-    rateLimits.set(userId, limit);
-    return limit.count <= MAX_PHOTOS_PER_WINDOW;
+// Daily prompt limit covers photo logs, text meal logs, and Coach messages
+// (DB-backed, resets each calendar day in Singapore time / UTC+8)
+const MAX_PROMPTS_PER_DAY = 5;
+const getPromptCountToday = (telegramId) => {
+    const today = (0, time_1.formatYmdInUtcOffset)(new Date());
+    const meals = nutrition_repository_1.nutritionRepository.getPromptCountToday(telegramId, today);
+    const coach = coach_repository_1.coachRepository.getCoachInputCountToday(telegramId, today);
+    return meals + coach;
+};
+const checkDailyPromptLimit = (telegramId) => {
+    return getPromptCountToday(telegramId) < MAX_PROMPTS_PER_DAY;
+};
+const getPromptsRemaining = (telegramId) => {
+    return Math.max(0, MAX_PROMPTS_PER_DAY - getPromptCountToday(telegramId));
 };
 // Middleware for logging and error handling
 bot.use(async (ctx, next) => {
@@ -207,7 +207,9 @@ bot.use(async (ctx, next) => {
 const startHandler = async (ctx) => {
     const { id, username, first_name, last_name } = ctx.from;
     await nutrition_service_1.nutritionService.registerUser(id, username, first_name, last_name);
-    await ctx.reply(getQuickHowTo(), (0, menu_1.buildMainMenu)());
+    const remaining = getPromptsRemaining(id);
+    const remainingLine = `📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today (shared across photos, text meals, and Coach).`;
+    await ctx.reply(`${getQuickHowTo()}\n\n${remainingLine}`, (0, menu_1.buildMainMenu)());
     const existingProfile = nutrition_service_1.nutritionService.getProfile(id);
     if (existingProfile) {
         await sendMainMenu(ctx, `Welcome back, ${existingProfile.display_name}!\n\nTap a button below to continue.`);
@@ -349,6 +351,10 @@ bot.command('coach', coachEnterHandler);
 bot.hears(menu_1.MENU.coach, coachEnterHandler);
 const runCoachAsk = async (ctx, userMessage) => {
     const userId = ctx.from.id;
+    if (!checkDailyPromptLimit(userId)) {
+        return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", (0, menu_1.buildMainMenu)());
+    }
+    coach_repository_1.coachRepository.recordCoachInput(userId, (0, time_1.formatYmdInUtcOffset)(new Date()));
     const thinkingMsg = await ctx.reply('🔎 analysing...');
     try {
         const { reply, hasMore } = await coach_service_1.coachService.ask(userId, userMessage);
@@ -358,6 +364,8 @@ const runCoachAsk = async (ctx, userMessage) => {
         buttons.push([telegraf_1.Markup.button.callback('Back to menu', 'coach_exit')]);
         await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => { });
         await ctx.reply(reply, telegraf_1.Markup.inlineKeyboard(buttons));
+        const remaining = getPromptsRemaining(userId);
+        await ctx.reply(`📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today.`);
     }
     catch (error) {
         await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => { });
@@ -486,6 +494,10 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
         return;
     }
     if (flow.mode === 'text_meal') {
+        if (!checkDailyPromptLimit(userId)) {
+            profileFlows.delete(userId);
+            return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!", (0, menu_1.buildMainMenu)());
+        }
         const description = text.slice(0, 500);
         profileFlows.delete(userId);
         const thinkingMsg = await ctx.reply('🔎 analysing...');
@@ -494,6 +506,8 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
             const { text: messageText } = buildFoodAnalysisMessage(data);
             await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => { });
             await ctx.replyWithMarkdownV2(messageText, (0, menu_1.buildMainMenu)());
+            const remaining = getPromptsRemaining(userId);
+            await ctx.reply(`📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today.`);
         }
         catch (error) {
             await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => { });
@@ -656,8 +670,8 @@ bot.action(/sex_(Male|Female)/, async (ctx) => {
 // Photo handler
 bot.on((0, filters_1.message)('photo'), async (ctx) => {
     const userId = ctx.from.id;
-    if (!checkRateLimit(userId)) {
-        return ctx.reply('⚠️ Rate limit exceeded. Please wait an hour before sending more photos (max 5 per hour).');
+    if (!checkDailyPromptLimit(userId)) {
+        return ctx.reply("⚠️ You've reached your daily limit of 5 prompts (shared across photos, text meals, and Coach). Try again tomorrow!");
     }
     const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get largest photo
     const userDescription = ctx.message.caption; // Use photo caption as description
@@ -677,6 +691,8 @@ bot.on((0, filters_1.message)('photo'), async (ctx) => {
         await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => { });
         await ctx.replyWithMarkdownV2(messageText, telegraf_1.Markup.inlineKeyboard([[telegraf_1.Markup.button.callback('Fix Results', `fix_entry_${entry_id}`)]]));
         await ctx.reply('Saved ✅', (0, menu_1.buildMainMenu)());
+        const remaining = getPromptsRemaining(userId);
+        await ctx.reply(`📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today.`);
     }
     catch (error) {
         await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id).catch(() => { });
