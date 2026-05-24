@@ -207,7 +207,9 @@ bot.use(async (ctx, next) => {
 const startHandler = async (ctx) => {
     const { id, username, first_name, last_name } = ctx.from;
     await nutrition_service_1.nutritionService.registerUser(id, username, first_name, last_name);
-    await ctx.reply(getQuickHowTo(), (0, menu_1.buildMainMenu)());
+    const remaining = getPromptsRemaining(id);
+    const remainingLine = `📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today (shared across photos, text meals, and Coach).`;
+    await ctx.reply(`${getQuickHowTo()}\n\n${remainingLine}`, (0, menu_1.buildMainMenu)());
     const existingProfile = nutrition_service_1.nutritionService.getProfile(id);
     if (existingProfile) {
         await sendMainMenu(ctx, `Welcome back, ${existingProfile.display_name}!\n\nTap a button below to continue.`);

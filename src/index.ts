@@ -249,7 +249,10 @@ const startHandler = async (ctx: any) => {
   const { id, username, first_name, last_name } = ctx.from;
   await nutritionService.registerUser(id, username, first_name, last_name);
 
-  await ctx.reply(getQuickHowTo(), buildMainMenu());
+  const remaining = getPromptsRemaining(id);
+  const remainingLine = `📊 ${remaining} prompt${remaining === 1 ? '' : 's'} remaining today (shared across photos, text meals, and Coach).`;
+
+  await ctx.reply(`${getQuickHowTo()}\n\n${remainingLine}`, buildMainMenu());
 
   const existingProfile = nutritionService.getProfile(id);
   if (existingProfile) {
@@ -262,7 +265,7 @@ const startHandler = async (ctx: any) => {
 
   coachSessions.delete(id);
   profileFlows.set(id, { mode: 'onboarding', step: 'name' });
-  
+
   await sendMainMenu(
     ctx,
     `Welcome to AI Nutrition Coach!\n\nTap “${MENU.start}” anytime to restart, or continue onboarding below.`
