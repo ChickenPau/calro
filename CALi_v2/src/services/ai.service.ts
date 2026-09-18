@@ -1,0 +1,489 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { config } from '@/config';
+import { NutritionData, NutritionDataSchema } from '@/models/nutrition';
+import { z } from 'zod';
+import winston from 'winston';
+
+const logger = winston.createLogger({
+  level: config.logger.level,
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+  ],
+});
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const toErrorMeta = (error: unknown) => {
+  const anyErr = error as any;
+  return {
+    name: anyErr?.name,
+    code: anyErr?.code,
+    status: anyErr?.status ?? anyErr?.response?.status,
+    message: anyErr?.message || String(error),
+  };
+};
+
+const normalizeModelName = (value: string): string => {
+  let v = String(value || '').trim();
+  if (!v) return v;
+  v = v.replace(/^models\//i, '');
+  const colonIndex = v.indexOf(':');
+  if (colonIndex >= 0) v = v.slice(0, colonIndex);
+  v = v.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+  v = v.replace(/[_\s]+/g, '-').toLowerCase();
+  v = v.replace(/[^a-z0-9.\-]/g, '-');
+  v = v.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  return v;
+};
+
+const retry = async <T>(
+  run: () => Promise<T>,
+  options: {
+    retries: number;
+    minTimeoutMs?: number;
+    factor?: number;
+    onFailedAttempt?: (info: { attemptNumber: number; retriesLeft: number; error: unknown }) => void;
+  }
+): Promise<T> => {
+  const retries = Math.max(0, Math.floor(options.retries));
+  const minTimeoutMs = Math.max(0, Math.floor(options.minTimeoutMs ?? 250));
+  const factor = Math.max(1, options.factor ?? 2);
+
+  let attemptNumber = 1;
+  while (true) {
+    try {
+      return await run();
+    } catch (error) {
+      const retriesLeft = retries - (attemptNumber - 1);
+      if (retriesLeft <= 0) throw error;
+      options.onFailedAttempt?.({ attemptNumber, retriesLeft, error });
+      const backoffMs = Math.round(minTimeoutMs * Math.pow(factor, attemptNumber - 1));
+      await delay(backoffMs);
+      attemptNumber++;
+    }
+  }
+};
+
+export class AIService {
+  private genAI: GoogleGenerativeAI | null;
+  private textModel: any | null;
+  private imageModel: any | null;
+  private textModelName: string | null;
+  private imageModelName: string | null;
+
+  constructor() {
+    if (!config.gemini.apiKey) {
+      this.genAI = null;
+      this.textModel = null;
+      this.imageModel = null;
+      this.textModelName = null;
+      this.imageModelName = null;
+      return;
+    }
+
+    this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
+    this.textModelName = normalizeModelName(config.gemini.textModel);
+    this.imageModelName = normalizeModelName(config.gemini.imageModel);
+    this.textModel = this.genAI.getGenerativeModel({ model: this.textModelName });
+    this.imageModel = this.genAI.getGenerativeModel({ model: this.imageModelName });
+  }
+
+  private ensureModels() {
+    if (!this.genAI || !this.textModel || !this.imageModel || !this.textModelName || !this.imageModelName) {
+      throw new Error('GEMINI_API_KEY is missing or invalid');
+    }
+    return {
+      genAI: this.genAI,
+      textModel: this.textModel,
+      imageModel: this.imageModel,
+      textModelName: this.textModelName,
+      imageModelName: this.imageModelName,
+    };
+  }
+
+  private isModelNotSupportedError(error: unknown): boolean {
+    const anyErr = error as any;
+    const status = anyErr?.status ?? anyErr?.response?.status;
+    const message = String(anyErr?.message || '').toLowerCase();
+    return (
+      status === 404 ||
+      (status === 400 && message.includes('unexpected model name format')) ||
+      message.includes('not found') ||
+      message.includes('not supported for generatecontent')
+    );
+  }
+
+  private async generateContent(kind: 'text' | 'image', input: any): Promise<any> {
+    const { genAI, textModel, imageModel, textModelName, imageModelName } = this.ensureModels();
+
+    const activeModel = kind === 'image' ? imageModel : textModel;
+    const activeModelName = kind === 'image' ? imageModelName : textModelName;
+
+    try {
+      return await activeModel.generateContent(input);
+    } catch (error) {
+      const fallbackModel = 'gemini-1.5-flash';
+      if (this.isModelNotSupportedError(error) && activeModelName !== fallbackModel) {
+        logger.warn('Gemini model not supported; falling back', {
+          kind,
+          requestedModel: activeModelName,
+          fallbackModel,
+          error: toErrorMeta(error),
+        });
+
+        const nextModel = genAI.getGenerativeModel({ model: fallbackModel });
+        if (kind === 'image') {
+          this.imageModelName = fallbackModel;
+          this.imageModel = nextModel;
+        } else {
+          this.textModelName = fallbackModel;
+          this.textModel = nextModel;
+        }
+
+        return await nextModel.generateContent(input);
+      }
+      throw error;
+    }
+  }
+
+  public async analyzeFoodImage(imageBase64: string, mimeType: string, userDescription?: string): Promise<{ data: NutritionData; rawResponse: string }> {
+    const instruction =
+      'You are a specialized Singaporean Nutritionist AI. Your task is to analyze images of food (primarily Singaporean hawker food, but also Western, Indian, Chinese, and other cuisines) and provide an accurate calorie estimate.';
+
+    const rules = `CRITICAL RULES:
+1) Identify the Dish: First identify if the dish is a standard hawker meal (e.g., Roasted Duck Rice, Char Siew Rice) or other cuisines.
+2) Reference Standards: Use Singapore Health Promotion Board (HPB) style baselines where possible (e.g., standard Duck Rice ~700 kcal) and adjust from there.
+3) Visual Scaling: Use the size of the spoon, chopsticks, bowl/plate rim to estimate portion size.
+4) Portion Sanity: If it looks like a standard single-person portion, DO NOT exceed 900 kcal unless it is clearly a massive sharing platter.
+5) If blurry/unclear: ask a short clarification question.`;
+
+    const prompt = `${instruction}
+
+${rules}
+
+${userDescription ? `User description: "${userDescription}"` : ''}
+
+Think step-by-step privately. Do not include your internal reasoning in the output.
+
+Return JSON ONLY in this schema:
+{
+  "dish_identified": "string",
+  "food_name": "string",
+  "breakdown_kcal": {
+    "rice_carbs": number,
+    "meat_protein": number,
+    "sauce_extras": number
+  },
+  "ingredients": [
+    {
+      "name": "string",
+      "grams": number,
+      "calories": number
+    }
+  ],
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fats_g": number,
+  "ai_tip": "string",
+  "clarification_question": "string"
+}`;
+
+    const runAnalysis = async () => {
+      const result = await this.generateContent('image', {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  data: imageBase64,
+                  mimeType,
+                },
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
+      });
+      const response = await result.response;
+      const text = response.text();
+      
+      try {
+        // Extract JSON from text if AI includes extra commentary
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('No valid JSON found in AI response');
+        }
+        const jsonData = JSON.parse(jsonMatch[0]);
+
+        if (jsonData && typeof jsonData === 'object') {
+          if (jsonData.clarification_question === null) delete jsonData.clarification_question;
+          if (jsonData.dish_identified === null) delete jsonData.dish_identified;
+          if (jsonData.breakdown_kcal === null) delete jsonData.breakdown_kcal;
+          if (jsonData.ingredients === null) delete jsonData.ingredients;
+          if (jsonData.breakdown_kcal && typeof jsonData.breakdown_kcal === 'object') {
+            if (jsonData.breakdown_kcal.rice_carbs === null) delete jsonData.breakdown_kcal.rice_carbs;
+            if (jsonData.breakdown_kcal.meat_protein === null) delete jsonData.breakdown_kcal.meat_protein;
+            if (jsonData.breakdown_kcal.sauce_extras === null) delete jsonData.breakdown_kcal.sauce_extras;
+          }
+
+          if (Array.isArray(jsonData.ingredients)) {
+            jsonData.ingredients = jsonData.ingredients
+              .filter((i: any) => i && typeof i === 'object')
+              .map((i: any) => {
+                if (i.grams === null) delete i.grams;
+                if (i.calories === null) delete i.calories;
+                return i;
+              });
+          }
+        }
+
+        if (typeof jsonData.food_name !== 'string' || jsonData.food_name.trim().length === 0) {
+          jsonData.food_name = userDescription && userDescription.trim().length > 0 ? userDescription.trim().slice(0, 80) : 'Unknown';
+        }
+        const validatedData = NutritionDataSchema.parse(jsonData);
+        return { data: validatedData, rawResponse: text };
+      } catch (error) {
+        logger.error('Failed to parse AI response', { error: (error as any)?.message || error, text });
+        throw new Error('Invalid AI response format');
+      }
+    };
+
+    return retry(runAnalysis, {
+      retries: 3,
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        logger.warn(`AI Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
+      },
+    });
+  }
+
+  public async analyzeFoodText(description: string): Promise<{ data: NutritionData; rawResponse: string }> {
+    const instruction =
+      'You are an expert sports nutritionist. Estimate Calories, Protein (g), Carbohydrates (g), and Fats (g) from the user\'s meal description. If portion size is unclear, make a reasonable assumption.';
+    const prompt = `${instruction}
+
+Meal description:
+"${description}"
+
+Please respond in the following JSON format ONLY:
+{
+  "food_name": "string",
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fats_g": number,
+  "ingredients": [
+    {
+      "name": "string",
+      "grams": number,
+      "calories": number
+    }
+  ],
+  "ai_tip": "string"
+}`;
+
+    const runAnalysis = async () => {
+      const result = await this.generateContent('text', {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
+      });
+      const text = result.response.text();
+
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('No valid JSON found in AI response');
+        }
+        const jsonData = JSON.parse(jsonMatch[0]);
+
+        if (jsonData && typeof jsonData === 'object') {
+          if (jsonData.ingredients === null) delete jsonData.ingredients;
+          if (Array.isArray(jsonData.ingredients)) {
+            jsonData.ingredients = jsonData.ingredients
+              .filter((i: any) => i && typeof i === 'object')
+              .map((i: any) => {
+                if (i.grams === null) delete i.grams;
+                if (i.calories === null) delete i.calories;
+                return i;
+              });
+          }
+        }
+
+        if (typeof jsonData.food_name !== 'string' || jsonData.food_name.trim().length === 0) {
+          jsonData.food_name = description.trim().slice(0, 80);
+        }
+        const validatedData = NutritionDataSchema.parse(jsonData);
+        return { data: validatedData, rawResponse: text };
+      } catch (error) {
+        logger.error('Failed to parse AI response (text meal)', { error: (error as any)?.message || error, text });
+        throw new Error('Invalid AI response format');
+      }
+    };
+
+    return retry(runAnalysis, {
+      retries: 3,
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        logger.warn(`AI Text Analysis attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
+      },
+    });
+  }
+
+  public async calculateBmi(weightKg: number, heightCm: number): Promise<{ bmi: number; bmi_status: 'Obese' | 'Acceptable range'; target_weight_kg: number }> {
+    const schema = z.object({
+      bmi: z.number(),
+      bmi_status: z.enum(['Obese', 'Acceptable range']),
+      target_weight_kg: z.number(),
+    });
+
+    const prompt = `Calculate BMI using BMI = weight(kg) / [height(m)]^2.
+Weight (kg): ${weightKg}
+Height (cm): ${heightCm}
+
+Classification: BMI > 27 = "Obese", BMI <= 27 = "Acceptable range".
+Also calculate target_weight_kg that would be BMI = 27.
+
+Return JSON ONLY:
+{
+  "bmi": number,
+  "bmi_status": "Obese" | "Acceptable range",
+  "target_weight_kg": number
+}`;
+
+    const run = async () => {
+      const result = await this.generateContent('text', prompt);
+      const text = result.response.text();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No valid JSON found in BMI response');
+      const jsonData = JSON.parse(jsonMatch[0]);
+      const validated = schema.parse(jsonData);
+      return {
+        bmi: Number(validated.bmi),
+        bmi_status: validated.bmi_status,
+        target_weight_kg: Number(validated.target_weight_kg),
+      };
+    };
+
+    return retry(run, {
+      retries: 2,
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        logger.warn(`BMI attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
+      },
+    });
+  }
+
+  public async getHealthyBmiRange(input: {
+    age_years: number;
+    sex: 'Male' | 'Female' | 'Other';
+    height_cm: number;
+  }): Promise<{ bmi_low: number; bmi_high: number; rationale: string }> {
+    const schema = z.object({
+      bmi_low: z.number(),
+      bmi_high: z.number(),
+      rationale: z.string(),
+    });
+
+    const prompt = `You are a careful health assistant.
+Return the standard healthy BMI range for a person based on age and sex.
+
+User:
+- age_years: ${input.age_years}
+- sex: ${input.sex}
+- height_cm: ${input.height_cm}
+
+Notes:
+- For adults (>=18), use WHO adult healthy BMI range.
+- For minors (<18), provide a reasonable BMI range summary appropriate for age/sex (if you cannot provide, fall back to adult range).
+
+Return JSON ONLY:
+{
+  "bmi_low": number,
+  "bmi_high": number,
+  "rationale": "short rationale"
+}`;
+
+    const run = async () => {
+      const result = await this.generateContent('text', prompt);
+      const text = result.response.text();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No valid JSON found in BMI range response');
+      const jsonData = JSON.parse(jsonMatch[0]);
+      const validated = schema.parse(jsonData);
+      return {
+        bmi_low: Number(validated.bmi_low),
+        bmi_high: Number(validated.bmi_high),
+        rationale: validated.rationale,
+      };
+    };
+
+    return retry(run, {
+      retries: 2,
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        logger.warn(`BMI range attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
+      },
+    });
+  }
+
+  public async calculateDailyCalorieGoal(input: {
+    age_years: number;
+    sex: 'Male' | 'Female' | 'Other';
+    height_cm: number;
+    weight_kg: number;
+  }): Promise<{ goal_calories: number; rationale: string }> {
+    const schema = z.object({
+      goal_calories: z.number(),
+      rationale: z.string(),
+    });
+
+    const prompt = `You are a sports nutrition expert.
+Recommend a single daily calorie goal (kcal/day) for a healthy adult based on basic biometrics.
+
+User biometrics:
+- age_years: ${input.age_years}
+- sex: ${input.sex}
+- height_cm: ${input.height_cm}
+- weight_kg: ${input.weight_kg}
+
+Assumptions:
+- Moderate activity unless indicated.
+- Provide a conservative, sustainable recommendation.
+
+Return JSON ONLY:
+{
+  "goal_calories": number,
+  "rationale": "short explanation"
+}`;
+
+    const run = async () => {
+      const result = await this.generateContent('text', prompt);
+      const text = result.response.text();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No valid JSON found in calorie goal response');
+      const jsonData = JSON.parse(jsonMatch[0]);
+      const validated = schema.parse(jsonData);
+      return {
+        goal_calories: Math.round(Number(validated.goal_calories)),
+        rationale: validated.rationale,
+      };
+    };
+
+    return retry(run, {
+      retries: 2,
+      onFailedAttempt: ({ attemptNumber, retriesLeft, error }) => {
+        logger.warn(`Calorie goal attempt ${attemptNumber} failed. ${retriesLeft} retries left.`, { error: toErrorMeta(error) });
+      },
+    });
+  }
+}
+
+export const aiService = new AIService();
+export default aiService;
